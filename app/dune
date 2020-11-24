@@ -1,0 +1,17 @@
+(executable
+ (name builder_client)
+ (public_name builder-client)
+ (modules builder_client)
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty bos))
+
+(executable
+ (name client)
+ (public_name client)
+ (modules client)
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty bos))
+
+(executable
+ (name server)
+ (public_name builder-server)
+ (modules server)
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty lwt lwt.unix bos bheap ptime.clock.os duration))
