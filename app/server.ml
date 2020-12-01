@@ -185,6 +185,7 @@ let job_finished state uuid res data =
       ignore (Bos.OS.File.write p value))
     data;
   let in_dir = Fpath.(out_dir / "input") in
+  ignore (Bos.OS.Dir.create in_dir);
   List.iter (fun (path, value) ->
       let p = Fpath.append in_dir path in
       ignore (Bos.OS.Dir.create (Fpath.parent p));
@@ -228,8 +229,10 @@ let handle t fd addr =
           | Some job -> Lwt.return job
         in
         Lwt.bind (find_job ()) (fun job ->
+            (* TODO set a timer / timeout and re-queue the same job if timeout expired *)
             ignore (dump t);
             let uuid = uuid_gen () in
+            (* TODO if this write fails, put job back into queue! *)
             write_cmd fd (Builder.Job_schedule (uuid, job)) >>= fun () ->
             Logs.app (fun m -> m "job %a scheduled %a"
                          Uuidm.pp uuid Builder.pp_job job);
