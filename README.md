@@ -8,9 +8,9 @@ The server keeps persistent state of the job queue (so restarts / crashes are
 dealt with). A client connects, provides some information about itself, and
 then waits for a job. Once a job is read and accepted, it is executed by the
 client. Resulting artifacts can be transferred by the client to the server.
-2
+
 The server has the ability to schedule jobs at regular intervals - similar to
-crontab.
+crontab - but clients are usually executed in sandboxes/ jailed environments.
 
 Handled and unhandled error conditions:
 - client execution fails (timeout, restart, killed): not handled
@@ -26,9 +26,8 @@ Left to do:
 - client should inform when data passed to it and artifacts overlap (name / checksum)
 - client could sandbox the executed script a bit more (maybe?)
 - client should have a timeout for the script to be executed
-- separate stdout and stderr to be sent to the server?
-- UI
 - retrieve artifacts even if execution failed
 - the running jobs are not stored onto disk, which may result in unexpected behaviour
-- should instead once a job is scheduled the uuid and job information being dumped to disk already (also avoids dummy job dump)
-- directory traversals (server folds over output directory and collects files)
+- should instead once a job is scheduled the uuid and job information being dumped to disk already (also avoids dummy job dump, and allows recovery of running jobs when server restarts)
+- potential security issue: directory traversals (server folds over output directory and collects files)
+- timeout of clients (handle disappearing client on server side by re-queueing job)
