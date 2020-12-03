@@ -159,7 +159,7 @@ let job_finished state uuid res data =
       c, j, o
   in
   state.running <- UM.remove uuid state.running;
-  let out_dir = Fpath.(state.dir / Uuidm.to_string uuid) in
+  let out_dir = Fpath.(state.dir / job.Builder.name / Uuidm.to_string uuid) in
   Bos.OS.Dir.create out_dir >>= fun _ ->
   let full =
     let out = List.map (fun (d, d') -> Int64.to_int d, d') out in
