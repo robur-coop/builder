@@ -85,14 +85,17 @@ let p_to_span p =
   in
   Ptime.Span.of_int_s s
 
-let schedule_job t now period job =
+let add_to_queue t job =
   if Queue.fold (fun acc i ->
       if acc then not (String.equal i.Builder.name job.Builder.name) else acc)
       true t.queue
   then begin
     Queue.add job t.queue;
     Lwt_condition.broadcast t.waiter ();
-  end;
+  end
+
+let schedule_job t now period job =
+  add_to_queue t job;
   match Ptime.add_span now (p_to_span period) with
   | None -> Logs.err (fun m -> m "ptime add span failed when scheduling job")
   | Some next -> S.add t.schedule Builder.{ next ; period ; job }
@@ -229,11 +232,13 @@ let handle t fd addr =
           | Some job -> Lwt.return job
         in
         Lwt.bind (find_job ()) (fun job ->
+            let put_back () = add_to_queue t job; ignore (dump t) in
             (* TODO set a timer / timeout and re-queue the same job if timeout expired *)
             ignore (dump t);
             let uuid = uuid_gen () in
-            (* TODO if this write fails, put job back into queue! *)
-            write_cmd fd (Builder.Job_schedule (uuid, job)) >>= fun () ->
+            Lwt_result.bind_lwt_err
+              (write_cmd fd (Builder.Job_schedule (uuid, job)))
+              (fun e -> put_back (); Lwt.return e) >>= fun () ->
             Logs.app (fun m -> m "job %a scheduled %a"
                          Uuidm.pp uuid Builder.pp_job job);
             t.running <- UM.add uuid (Ptime_clock.now (), job, Lwt_condition.create (), []) t.running;
