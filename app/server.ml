@@ -232,19 +232,26 @@ let handle t fd addr =
           | Some job -> Lwt.return job
         in
         Lwt.bind (find_job ()) (fun job ->
-            let put_back () = add_to_queue t job; ignore (dump t) in
+            let put_back_on_err f =
+              Lwt_result.bind_lwt_err
+                f
+                (fun e ->
+                   Logs.warn (fun m -> m "communication failure with %a, job %a put back"
+                                 Builder.pp_job job pp_sockaddr addr);
+                   add_to_queue t job;
+                   ignore (dump t);
+                   Lwt.return e)
+            in
             (* TODO set a timer / timeout and re-queue the same job if timeout expired *)
             ignore (dump t);
             let uuid = uuid_gen () in
-            Lwt_result.bind_lwt_err
-              (write_cmd fd (Builder.Job_schedule (uuid, job)))
-              (fun e -> put_back (); Lwt.return e) >>= fun () ->
-            Logs.app (fun m -> m "job %a scheduled %a"
-                         Uuidm.pp uuid Builder.pp_job job);
+            put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, job))) >>= fun () ->
+            Logs.app (fun m -> m "job %a scheduled %a for %a"
+                         Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
             t.running <- UM.add uuid (Ptime_clock.now (), job, Lwt_condition.create (), []) t.running;
             (* await output *)
             let rec read () =
-              read_cmd fd >>= function
+              put_back_on_err (read_cmd fd) >>= function
               | Builder.Output (uuid, data) ->
                 Logs.app (fun m -> m "job %a output %S" Uuidm.pp uuid data);
                 (match UM.find_opt uuid t.running with
