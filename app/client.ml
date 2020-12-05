@@ -46,6 +46,10 @@ let unschedule () remote name =
   connect remote >>= fun s ->
   Builder.write_cmd s (Builder.Unschedule name)
 
+let execute () remote name =
+  connect remote >>= fun s ->
+  Builder.write_cmd s (Builder.Execute name)
+
 let schedule () remote name script period dir =
   let files =
     match dir with
@@ -164,11 +168,15 @@ let schedule_cmd =
   Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period $ dir)),
   Term.info "schedule"
 
+let execute_cmd =
+  Term.(term_result (const execute $ setup_log $ remote $ nam)),
+  Term.info "execute"
+
 let help_cmd =
   let doc = "Builder client" in
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
   Term.info "builder" ~version:Builder.version ~doc
 
-let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_cmd ]
+let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_cmd ; execute_cmd ]
 
 let () = match Term.eval_choice help_cmd cmds with `Ok () -> exit 0 | _ -> exit 1

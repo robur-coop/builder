@@ -80,8 +80,9 @@ type cmd =
   | Info
   | Info_reply of info
   | Observe of Uuidm.t
+  | Execute of string
 
-let cmds = 11
+let cmds = 12
 
 let version =
   Fmt.strf "version %%VERSION%% protocol version %d" cmds
@@ -102,6 +103,7 @@ let pp_cmd ppf = function
   | Info -> Fmt.string ppf "info"
   | Info_reply info -> Fmt.pf ppf "info: %a" pp_info info
   | Observe id -> Fmt.pf ppf "observe %a" Uuidm.pp id
+  | Execute name -> Fmt.pf ppf "execute %s" name
 
 type state_item =
   | Job of job
@@ -260,6 +262,7 @@ module Asn = struct
       | `C2 `C3 () -> Job_requested
       | `C2 `C4 jn -> Unschedule jn
       | `C2 `C5 id -> Observe id
+      | `C2 `C6 jn -> Execute jn
     and g = function
       | Client_hello max -> `C1 (`C1 max)
       | Server_hello max -> `C1 (`C2 max)
@@ -273,6 +276,7 @@ module Asn = struct
       | Job_requested -> `C2 (`C3 ())
       | Unschedule jn -> `C2 (`C4 jn)
       | Observe id -> `C2 (`C5 id)
+      | Execute jn -> `C2 (`C6 jn)
     in
     Asn.S.(map f g
              (choice2
@@ -292,7 +296,7 @@ module Asn = struct
                    (explicit 5 (sequence2
                                   (required ~label:"period" period)
                                   (required ~label:"job" job))))
-                (choice5
+                (choice6
                    (explicit 6 null)
                    (explicit 7 (sequence3
                                   (required ~label:"schedule" (sequence_of schedule))
@@ -306,6 +310,7 @@ module Asn = struct
                    (explicit 8 null)
                    (explicit 9 utf8_string)
                    (explicit 10 uuid)
+                   (explicit 11 utf8_string)
                 )))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd

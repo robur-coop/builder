@@ -31,3 +31,4 @@ Left to do:
 - should instead once a job is scheduled the uuid and job information being dumped to disk already (also avoids dummy job dump, and allows recovery of running jobs when server restarts)
 - potential security issue: directory traversals (server folds over output directory and collects files)
 - timeout of clients (handle disappearing client on server side by re-queueing job)
+- a "cancel" command which aborts execution of a given job (should this be re-scheduled?)

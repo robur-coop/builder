@@ -321,6 +321,30 @@ let handle t fd addr =
         t.queue <- queue;
         ignore (dump t);
         Lwt.return (Ok ())
+      | Builder.Execute name ->
+        begin
+          Logs.app (fun m -> m "execute %s" name);
+          (* first we look through the schedule to find <name> *)
+          let s = S.create ~dummy 13 in
+          match S.fold (fun ({ Builder.job ; period ; _ } as si) j ->
+              match j, String.equal job.Builder.name name with
+              | None, true -> Some (job, period)
+              | Some _, true ->
+                (* violates our policy: there ain't multiple jobs with same name *)
+                assert false
+              | _, false -> S.add s si; j)
+              t.schedule None
+          with
+          | None ->
+            Logs.err (fun m -> m "couldn't find job %s" name);
+            Lwt.return (Ok ())
+          | Some (job, period)  ->
+            t.schedule <- s;
+            schedule_job t (Ptime_clock.now ()) period job;
+            ignore (dump t);
+            Logs.app (fun m -> m "queued job %s" name);
+            Lwt.return (Ok ())
+        end
       | Builder.Info ->
         Logs.app (fun m -> m "info");
         let reply =
@@ -348,14 +372,10 @@ let handle t fd addr =
               in
               more ()
           | None ->
-            let console_file = Fpath.(t.dir / Uuidm.to_string id / "console.log") in
-            match Bos.OS.File.read_lines console_file with
-            | Error _ -> Lwt.return (Ok ())
-            | Ok data ->
-              let open Lwt.Infix in
-              Lwt_list.iter_s (fun l ->
-                  write_cmd fd (Builder.Output (id, l)) >|= ignore) data >|= fun () ->
-              Ok ()
+            (* TODO figure which job name this may be *)
+            (* maybe more useful to get latest result of <job-name>? *)
+            Logs.err (fun m -> m "not implemented: job not executing");
+            Lwt.return (Ok ())
         end
       | cmd ->
         Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
