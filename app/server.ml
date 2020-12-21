@@ -364,7 +364,8 @@ let handle t fd addr =
           | Some (_, _, cond, out) ->
               let open Lwt.Infix in
               Lwt_list.iter_s (fun (_, l) ->
-                  write_cmd fd (Builder.Output (id, l)) >|= ignore) out >>= fun () ->
+                  write_cmd fd (Builder.Output (id, l)) >|= ignore)
+                (List.rev out) >>= fun () ->
               let rec more () =
                 Lwt_condition.wait cond >>= fun data ->
                 write_cmd fd (Builder.Output (id, data)) >>= fun _ ->
