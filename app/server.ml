@@ -74,6 +74,7 @@ type t = {
   mutable running : (Ptime.t * Builder.job * string Lwt_condition.t * (int64 * string) list) UM.t ;
   waiter : unit Lwt_condition.t ;
   dir : Fpath.t ;
+  upload : string option ;
 }
 
 let p_to_span p =
@@ -126,7 +127,7 @@ let dump, restore =
      let bak = Fpath.(t.dir / file + "tmp") in
      Bos.OS.File.write bak (Cstruct.to_string data) >>= fun () ->
      Bos.OS.U.(error_to_msg (rename bak Fpath.(t.dir / file)))),
-  (fun dir ->
+  (fun upload dir ->
      Bos.OS.Dir.create dir >>= fun _ ->
      let to_read = Fpath.(dir / file) in
      let queue = Queue.create ()
@@ -136,7 +137,7 @@ let dump, restore =
      Bos.OS.File.exists to_read >>= function
      | false ->
        Logs.warn (fun m -> m "state file does not exist, using empty");
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir }
+       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload }
      | true ->
        Bos.OS.File.read to_read >>= fun data ->
        Builder.Asn.state_of_cs (Cstruct.of_string data) >>= fun items ->
@@ -146,41 +147,31 @@ let dump, restore =
              | Builder.Schedule s -> S.add schedule s; (queue, schedule))
            (queue, schedule) items
        in
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir })
+       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload })
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
-let job_finished state uuid res data =
-  let open Rresult.R.Infix in
-  let now = Ptime_clock.now () in
-  let started, job, out =
-    match UM.find_opt uuid state.running with
-    | None -> Ptime.epoch, dummy.Builder.job, []
-    | Some (c, j, cond, o) ->
-      let res_str = Fmt.to_to_string Builder.pp_execution_result res in
-      Lwt_condition.broadcast cond res_str;
-      c, j, o
-  in
-  state.running <- UM.remove uuid state.running;
-  let out_dir = Fpath.(state.dir / job.Builder.name / Uuidm.to_string uuid) in
-  Bos.OS.Dir.create out_dir >>= fun _ ->
-  let full =
-    let out = List.map (fun (d, d') -> Int64.to_int d, d') out in
-    let v = job, uuid, out, started, now, res, data in
-    Builder.Asn.exec_to_cs v
-  in
-  Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full) >>= fun () ->
-  let console_out =
+let prepare_console out started now res =
+  let cons =
     List.map (fun (delta, txt) ->
-        Printf.sprintf "%dms: %S" (Duration.to_ms delta) txt)
+        Printf.sprintf "%dms: %S" (Duration.to_ms (Int64.of_int delta)) txt)
       (List.rev out)
   in
-  let console = Fpath.(out_dir / "console.log") in
   let started = "started at " ^ Ptime.to_rfc3339 started
   and stopped = "stopped at " ^ Ptime.to_rfc3339 now
   and exited = Fmt.to_to_string Builder.pp_execution_result res
   in
-  Bos.OS.File.write_lines console (started :: console_out @ [ exited ; stopped ]) >>= fun () ->
+  started :: cons @ [ exited ; stopped ]
+
+let save_to_disk dir ((job, uuid, out, started, now, res, data) as full) =
+  let open Rresult.R.Infix in
+  let out_dir = Fpath.(dir / job.Builder.name / Uuidm.to_string uuid) in
+  Logs.info (fun m -> m "saving result to %a" Fpath.pp out_dir);
+  Bos.OS.Dir.create out_dir >>= fun _ ->
+  let full_cs = Builder.Asn.exec_to_cs full in
+  Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs) >>= fun () ->
+  let console = prepare_console out started now res in
+  Bos.OS.File.write_lines Fpath.(out_dir / "console.log") console >>= fun () ->
   let out = Fpath.(out_dir / "output") in
   List.iter (fun (path, value) ->
       let p = Fpath.append out path in
@@ -195,6 +186,35 @@ let job_finished state uuid res data =
       ignore (Bos.OS.File.write p value))
     job.Builder.files;
   Bos.OS.File.write Fpath.(in_dir / "script.sh") job.Builder.script
+
+let upload url dir full =
+  let full_cs = Builder.Asn.exec_to_cs full in
+  match Curly.(run (Request.make ~url ~meth:`POST ~body:(Cstruct.to_string full_cs) ())) with
+  | Ok x ->
+    Logs.info (fun m -> m "upload returned %d" x.Curly.Response.code);
+    Ok ()
+  | Error e ->
+    Logs.err (fun m -> m "upload failed %a, now saving to disk" Curly.Error.pp e);
+    save_to_disk dir full
+
+let job_finished state uuid res data =
+  let now = Ptime_clock.now () in
+  let started, job, out =
+    match UM.find_opt uuid state.running with
+    | None -> Ptime.epoch, dummy.Builder.job, []
+    | Some (c, j, cond, o) ->
+      let res_str = Fmt.to_to_string Builder.pp_execution_result res in
+      Lwt_condition.broadcast cond res_str;
+      c, j, o
+  in
+  state.running <- UM.remove uuid state.running;
+  let full =
+    let out = List.map (fun (d, d') -> Int64.to_int d, d') out in
+    job, uuid, out, started, now, res, data
+  in
+  match state.upload with
+  | None -> save_to_disk state.dir full
+  | Some url -> upload url state.dir full
 
 let handle t fd addr =
   (* -- client connection:
@@ -279,7 +299,7 @@ let handle t fd addr =
             let timeout () =
               (* an hour should be enough for a job *)
               let open Lwt.Infix in
-              let timeout = 60. *. 60. in
+              let timeout = Duration.(to_f (of_hour 1)) in
               Lwt_unix.sleep timeout >>= fun () ->
               Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
               ignore (job_finished t uuid (Builder.Msg "timeout") []);
@@ -397,11 +417,11 @@ let handle t fd addr =
                  Builder.pp_cmd cmd);
     Lwt_result.lift (Error (`Msg "bad communication"))
 
-let jump () ip port dir =
+let jump () ip port dir url =
   Lwt_main.run
     (Sys.(set_signal sigpipe Signal_ignore);
      let d = Fpath.v dir in
-     Lwt_result.lift (restore d) >>= fun state ->
+     Lwt_result.lift (restore url d) >>= fun state ->
      (match state with
       | Ok s -> Lwt.return s | Error `Msg m -> Lwt.fail_with m) >>= fun state ->
      let modified = schedule state in
@@ -453,8 +473,12 @@ let dir =
   let doc = "Directory for persistent data (defaults to /var/db/builder)" in
   Arg.(value & opt dir "/var/db/builder" & info [ "dir" ] ~doc)
 
+let upload =
+  let doc = "Upload artifacts to URL (instead of local storage)" in
+  Arg.(value & opt (some string) None & info [ "upload" ] ~doc)
+
 let cmd =
-  Term.(term_result (const jump $ setup_log $ ip $ port $ dir)),
+  Term.(term_result (const jump $ setup_log $ ip $ port $ dir $ upload)),
   Term.info "builder-server" ~version:Builder.version
 
 let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
