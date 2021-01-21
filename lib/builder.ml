@@ -310,8 +310,8 @@ module Asn = struct
                    (explicit 8 null)
                    (explicit 9 utf8_string)
                    (explicit 10 uuid)
-                   (explicit 11 utf8_string)
-                )))
+                   (explicit 11 utf8_string))
+                ))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd
 end

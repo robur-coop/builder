@@ -242,7 +242,6 @@ let handle t fd addr =
                    ignore (dump t);
                    Lwt.return e)
             in
-            (* TODO set a timer / timeout and re-queue the same job if timeout expired *)
             ignore (dump t);
             let uuid = uuid_gen () in
             put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, job))) >>= fun () ->
@@ -253,7 +252,7 @@ let handle t fd addr =
             let rec read () =
               put_back_on_err (read_cmd fd) >>= function
               | Builder.Output (uuid, data) ->
-                Logs.app (fun m -> m "job %a output %S" Uuidm.pp uuid data);
+                Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
                 (match UM.find_opt uuid t.running with
                  | None ->
                    Logs.err (fun m -> m "unknown %a, discarding %S"
@@ -275,9 +274,20 @@ let handle t fd addr =
               | cmd ->
                 Logs.err (fun m -> m "expected output of job finished, got %a"
                              Builder.pp_cmd cmd);
-                Lwt.return (Ok ())
+                read ()
             in
-            read ())
+            let timeout () =
+              (* an hour should be enough for a job *)
+              let open Lwt.Infix in
+              let timeout = 60. *. 60. in
+              Lwt_unix.sleep timeout >>= fun () ->
+              Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
+              ignore (job_finished t uuid (Builder.Msg "timeout") []);
+              add_to_queue t job;
+              ignore (dump t);
+              Lwt.return (Ok ())
+            in
+            Lwt.choose [ read () ; timeout () ])
       | Builder.Job_finished (uuid, r, data) ->
         Logs.app (fun m -> m "job %a immediately finished with %a" Uuidm.pp uuid
                      Builder.pp_execution_result r);
