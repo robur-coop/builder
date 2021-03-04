@@ -68,7 +68,7 @@ let collect_output files tmpdir =
             Bos.OS.Cmd.run Bos.Cmd.(v "cp" % p f % p debug) >>= fun () ->
             Bos.OS.Cmd.run Bos.Cmd.(v "strip" % p f)
           with
-          | Ok _ -> f :: debug :: acc
+          | Ok () -> f :: debug :: acc
           | Error `Msg msg ->
             Logs.warn (fun m -> m "couldn't copy or strip %a: %s" Fpath.pp f msg);
             f :: acc
