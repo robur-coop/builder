@@ -188,13 +188,21 @@ let save_to_disk dir ((job, uuid, out, started, now, res, data) as full) =
   Bos.OS.File.write Fpath.(in_dir / "script.sh") job.Builder.script
 
 let upload url dir full =
-  let full_cs = Builder.Asn.exec_to_cs full in
-  match Curly.(run (Request.make ~url ~meth:`POST ~body:(Cstruct.to_string full_cs) ())) with
+  let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
+  match Curly.(run (Request.make ~url ~meth:`POST ~body ())) with
   | Ok x ->
-    Logs.info (fun m -> m "upload returned %d" x.Curly.Response.code);
-    Ok ()
+    let code = x.Curly.Response.code in
+    if code >= 200 && code < 300 then begin
+      Logs.info (fun m -> m "successful upload (HTTP %d)" code);
+      Ok ()
+    end else begin
+      Logs.err (fun m -> m "upload failed (HTTP %d, body: %s), saving to %a"
+                   code x.Curly.Response.body Fpath.pp dir);
+      save_to_disk dir full
+    end
   | Error e ->
-    Logs.err (fun m -> m "upload failed %a, now saving to disk" Curly.Error.pp e);
+    Logs.err (fun m -> m "upload failed %a, saving to %a"
+                 Curly.Error.pp e Fpath.pp dir);
     save_to_disk dir full
 
 let job_finished state uuid res data =
