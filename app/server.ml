@@ -217,7 +217,8 @@ let job_finished state uuid res data =
   in
   state.running <- UM.remove uuid state.running;
   let full =
-    let out = List.map (fun (d, d') -> Int64.to_int d, d') out in
+    let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
+    let out = List.rev out in
     job, uuid, out, started, now, res, data
   in
   match state.upload with
