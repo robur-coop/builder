@@ -264,12 +264,12 @@ let handle t fd addr =
             let put_back_on_err f =
               Lwt_result.bind_lwt_err
                 f
-                (fun e ->
-                   Logs.warn (fun m -> m "communication failure with %a, job %a put back"
-                                 Builder.pp_job job pp_sockaddr addr);
+                (fun (`Msg err) ->
+                   Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
+                                 err Builder.pp_job job pp_sockaddr addr);
                    add_to_queue t job;
                    ignore (dump t);
-                   Lwt.return e)
+                   Lwt.return (`Msg err))
             in
             ignore (dump t);
             let uuid = uuid_gen () in

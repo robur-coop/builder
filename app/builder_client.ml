@@ -20,19 +20,14 @@ let rec tmp_dirname () =
 let read_console_write_network s fd uuid =
   let ch = Unix.in_channel_of_descr fd in
   let rec read_write () =
-    try
-      let line = input_line ch in
-      Builder.write_cmd s (Builder.Output (uuid, line)) |> ignore; (* TODO *)
-      read_write ()
-    with
-      End_of_file -> ()
+    let line = input_line ch in
+    Builder.write_cmd s (Builder.Output (uuid, line)) |> ignore; (* TODO *)
+    read_write ()
   in
-  read_write ();
-  exit 0
+  try read_write () with End_of_file -> exit 0
 
 let prepare_fs job =
   let tmpdir = Fpath.v (tmp_dirname ()) in
-  at_exit (fun () -> ignore (Bos.OS.Dir.delete ~recurse:true tmpdir));
   Bos.OS.Dir.create tmpdir >>= fun did_not_exist ->
   if not did_not_exist then
     Error (`Msg "path already existed")
@@ -102,21 +97,27 @@ let execute_job s uuid job =
   | Ok tmpdir ->
     let to_read, out = Unix.pipe () in
     let f = Unix.fork () in
-    if f = 0 then
+    if f = 0 then begin
       (* child *)
+      Unix.close out;
       read_console_write_network s to_read uuid
-    else (* parent *)
+    end else (* parent *)
       let toexec = Fpath.(to_string (tmpdir / sh)) in
       let pid =
         Unix.create_process "/bin/sh" [| "-e" ; toexec |] Unix.stdin out out
       in
       let r = Unix.waitpid [] pid in
-      Unix.kill f 9;
-      match snd r with
-      | Unix.WEXITED 0 -> Builder.Exited 0, collect_output job.Builder.files tmpdir
-      | Unix.WEXITED c -> Builder.Exited c, []
-      | Unix.WSIGNALED s -> Builder.Signalled s, []
-      | Unix.WSTOPPED s -> Builder.Stopped s, []
+      Unix.close out;
+      let _ = Unix.waitpid [] f in
+      (* Unix.kill f 9; *)
+      let res = match snd r with
+        | Unix.WEXITED 0 -> Builder.Exited 0, collect_output job.Builder.files tmpdir
+        | Unix.WEXITED c -> Builder.Exited c, []
+        | Unix.WSIGNALED s -> Builder.Signalled s, []
+        | Unix.WSTOPPED s -> Builder.Stopped s, []
+      in
+      ignore (Bos.OS.Dir.delete ~recurse:true tmpdir);
+      res
 
 let jump () (host, port) =
   (* client semantics:
