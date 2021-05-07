@@ -1,0 +1,14 @@
+[Unit]
+Description=Builder daemon
+After=syslog.target network.target
+Wants=builder-client.service
+
+[Service]
+Type=simple
+User=builder
+Group=builder
+# Add --ip and --upload args as needed
+ExecStart=/usr/local/bin/builder-server --dir /var/lib/builder/
+
+[Install]
+WantedBy=multi-user.target
