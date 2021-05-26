@@ -14,7 +14,8 @@
  (name server)
  (public_name builder-server)
  (modules server)
- (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty lwt lwt.unix bos bheap ptime.clock.os duration curly))
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty lwt lwt.unix
+   bos bheap ptime.clock.os duration curly))
 
 (executable
  (name test)
