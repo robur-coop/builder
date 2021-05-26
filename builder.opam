@@ -21,10 +21,11 @@ depends: [
   "ptime"
   "rresult"
   "uuidm"
+  "curly"
 ]
 build: [
   ["dune" "subst"] {pinned}
   ["dune" "build" "-p" name "-j" jobs]
 ]
 
-synopsis: "."
+synopsis: "Scheduling and executing shell jobs"
