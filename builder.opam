@@ -22,9 +22,10 @@ depends: [
   "rresult"
   "uuidm"
   "curly"
+  "base64"
 ]
 build: [
-  ["dune" "subst"] {pinned}
+  ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
 ]
 
