@@ -28,6 +28,11 @@ depends: [
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
+  ["sh" "packaging/FreeBSD/create_package.sh"] {os = "freebsd"}
+]
+
+install: [
+  ["cp" "builder.txz" "%{bin}%/"] {os = "freebsd"}
 ]
 
 synopsis: "Scheduling and executing shell jobs"

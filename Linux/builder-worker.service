@@ -1,11 +1,11 @@
 [Unit]
-Description=Builder client
+Description=Builder worker
 After=syslog.target network.target docker.service
 Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/docker run --rm --name %n builder-client
+ExecStart=/usr/bin/docker run --rm --name %n builder-worker
 ExecStop=/usr/bin/docker stop %n
 # Apparently this is needed in case "docker run" dies for other reasons.
 ExecStopPost=/usr/bin/docker stop %n
