@@ -1,4 +1,4 @@
-orb (%%VERSION_NUM%%) unstable; urgency=medium
+builder (%%VERSION_NUM%%) unstable; urgency=medium
 
   * Initial release
 
