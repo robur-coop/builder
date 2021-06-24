@@ -8,7 +8,7 @@ Homepage: https://github.com/roburio/builder
 Vcs-Browser: https://github.com/roburio/builder
 Vcs-Git: https://github.com/roburio/builder.git
 Architecture: all
-Depends: libgmp
+Depends: libgmp10
 Description: Builder worker, server, client to execute shell scripts
   Builder executes shell scripts in isolated environments (containers) and
   preserves artifacts.
