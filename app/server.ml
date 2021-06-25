@@ -258,19 +258,20 @@ let handle t fd addr =
           | Some job -> Lwt.return job
         in
         Lwt.bind (find_job ()) (fun job ->
-            let put_back_on_err f =
+            let put_back_on_err uuid f =
               Lwt_result.bind_lwt_err
                 f
                 (fun (`Msg err) ->
                    Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
                                  err Builder.pp_job job pp_sockaddr addr);
+                   t.running <- UM.remove uuid t.running;
                    add_to_queue t job;
                    ignore (dump t);
                    Lwt.return (`Msg err))
             in
             ignore (dump t);
             let uuid = uuid_gen () in
-            put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, job))) >>= fun () ->
+            put_back_on_err uuid (write_cmd fd (Builder.Job_schedule (uuid, job))) >>= fun () ->
             Logs.app (fun m -> m "job %a scheduled %a for %a"
                          Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
             t.running <- UM.add uuid (Ptime_clock.now (), job, Lwt_condition.create (), []) t.running;
@@ -288,7 +289,7 @@ let handle t fd addr =
                 Lwt.return (Ok ())
               in
               let read_and_process_data () =
-                put_back_on_err (read_cmd fd) >>= function
+                put_back_on_err uuid (read_cmd fd) >>= function
                 | Builder.Output (uuid, data) ->
                   Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
                   (match UM.find_opt uuid t.running with
