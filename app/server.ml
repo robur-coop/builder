@@ -451,7 +451,7 @@ let jump () ip port dir url =
            Lwt_unix.accept s >>= fun (fd, addr) ->
            Lwt.async (fun () ->
                handle state fd addr >>= fun _ ->
-               Lwt_unix.close fd);
+               Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit));
            loop ()
          in
          loop ())
