@@ -14,12 +14,10 @@ let pp_data ppf xs =
 type job = {
   name : string ;
   script : string ;
-  files : data ;
 }
 
-let pp_job ppf { name ; script ; files } =
-  Fmt.pf ppf "name %s, script %d, files %a" name (String.length script)
-    pp_data files
+let pp_job ppf { name ; script } =
+  Fmt.pf ppf "name %s, script %d" name (String.length script)
 
 type execution_result =
   | Exited of int
@@ -146,10 +144,10 @@ module Asn = struct
                    (required ~label:"data" utf8_string))))
 
   let job =
-    let f (name, script, files) =
-      { name ; script ; files }
-    and g { name ; script ; files } =
-      name, script, files
+    let f (name, script, _files) =
+      { name ; script }
+    and g { name ; script } =
+      name, script, []
     in
     Asn.S.(map f g (sequence3
                       (required ~label:"name" utf8_string)

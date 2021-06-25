@@ -65,7 +65,7 @@ module S = Binary_heap.Make (struct
   end)
 
 let dummy =
-  let job = Builder.{ name = "dummy" ; script = "#nothing" ; files = [] } in
+  let job = Builder.{ name = "dummy" ; script = "#nothing" } in
   Builder.{ next = Ptime.epoch ; period = Daily ; job }
 
 type t = {
@@ -178,14 +178,7 @@ let save_to_disk dir ((job, uuid, out, started, now, res, data) as full) =
       ignore (Bos.OS.Dir.create (Fpath.parent p));
       ignore (Bos.OS.File.write p value))
     data;
-  let in_dir = Fpath.(out_dir / "input") in
-  ignore (Bos.OS.Dir.create in_dir);
-  List.iter (fun (path, value) ->
-      let p = Fpath.append in_dir path in
-      ignore (Bos.OS.Dir.create (Fpath.parent p));
-      ignore (Bos.OS.File.write p value))
-    job.Builder.files;
-  Bos.OS.File.write Fpath.(in_dir / "script.sh") job.Builder.script
+  Bos.OS.File.write Fpath.(out_dir / "input" / "script.sh") job.Builder.script
 
 let upload url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
@@ -209,7 +202,7 @@ let job_finished state uuid res data =
   let now = Ptime_clock.now () in
   let started, job, out =
     match UM.find_opt uuid state.running with
-    | None -> Ptime.epoch, dummy.Builder.job, []
+    | None -> Ptime.epoch, dummy.Builder.job, [] (* TODO emit an error out *)
     | Some (c, j, cond, o) ->
       let res_str = Fmt.to_to_string Builder.pp_execution_result res in
       Lwt_condition.broadcast cond res_str;

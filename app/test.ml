@@ -1,6 +1,6 @@
 
 let () =
-  let job = Builder.{ name = "test" ; script = "# nothing to do here" ; files = [] } in
+  let job = Builder.{ name = "test" ; script = "# nothing to do here" } in
   let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
   let out = [ (0, "hello") ; (3, "world") ; (10, "end") ] in
   let now = Ptime_clock.now () in

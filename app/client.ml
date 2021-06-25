@@ -50,37 +50,9 @@ let execute () remote name =
   connect remote >>= fun s ->
   Builder.write_cmd s (Builder.Execute name)
 
-let schedule () remote name script period dir =
-  let files =
-    match dir with
-    | None -> []
-    | Some f ->
-      let dir = Fpath.v f in
-      let all_files =
-        let dirs = [ dir ] in
-        let collect path acc = path :: acc in
-        match Bos.OS.Path.fold ~elements:`Files collect [] dirs with
-        | Ok files -> files
-        | Error `Msg msg ->
-          Logs.warn (fun m -> m "folding resulted in an error %s" msg);
-          []
-      in
-      List.fold_left (fun acc f ->
-          match Fpath.rem_prefix dir f with
-          | None ->
-            Logs.warn (fun m -> m "couldn't remove prefix from %a"
-                          Fpath.pp f);
-            acc
-          | Some name ->
-            match Bos.OS.File.read f with
-            | Ok data -> (name, data) :: acc
-            | Error `Msg e ->
-              Logs.err (fun m -> m "error reading %a: %s" Fpath.pp f e);
-              acc)
-        [] all_files
-  in
+let schedule () remote name script period =
   Bos.OS.File.read (Fpath.v script) >>= fun script ->
-  let job = Builder.{ name ; script ; files } in
+  let job = Builder.{ name ; script } in
   connect remote >>= fun s ->
   Builder.write_cmd s (Builder.Schedule (period, job))
 
@@ -139,10 +111,6 @@ let period =
   let doc = "The periodic execution interval" in
   Arg.(value & opt p Builder.Daily & info [ "period" ] ~doc ~docv:"PERIOD")
 
-let dir =
-  let doc = "The directory with supplementary material to embed into the job" in
-  Arg.(value & opt (some dir) None & info [ "dir" ] ~doc ~docv:"DIR")
-
 let script =
   let doc = "The script to execute" in
   Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"FILE")
@@ -165,7 +133,7 @@ let unschedule_cmd =
   Term.info "unschedule"
 
 let schedule_cmd =
-  Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period $ dir)),
+  Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period)),
   Term.info "schedule"
 
 let execute_cmd =

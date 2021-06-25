@@ -33,16 +33,10 @@ let prepare_fs job =
     Error (`Msg "path already existed")
   else
     Bos.OS.Dir.set_current tmpdir >>= fun () ->
-    List.fold_left (fun acc (f, v) ->
-        acc >>= fun () ->
-        let path = Fpath.append tmpdir f in
-        Bos.OS.Dir.create (Fpath.parent path) >>= fun _ ->
-        Bos.OS.File.write (Fpath.append tmpdir f) v)
-      (Ok ()) job.Builder.files >>= fun () ->
     Bos.OS.File.write ~mode:500 Fpath.(tmpdir / sh) job.Builder.script >>| fun () ->
     tmpdir
 
-let collect_output files tmpdir =
+let collect_output tmpdir =
   let all_files =
     let dirs = [ tmpdir ] in
     let collect path acc = path :: acc in
@@ -60,9 +54,6 @@ let collect_output files tmpdir =
         acc
       | Some name when Fpath.to_string name = sh ->
         (* ignoring the script.sh itself *)
-        acc
-      | Some name when List.exists (fun (p, _) -> Fpath.equal p name) files ->
-        (* ignoring all inputs *)
         acc
       | Some name ->
         match Bos.OS.File.read f with
@@ -92,7 +83,7 @@ let execute_job s uuid job =
       let _ = Unix.waitpid [] f in
       (* Unix.kill f 9; *)
       let res = match snd r with
-        | Unix.WEXITED 0 -> Builder.Exited 0, collect_output job.Builder.files tmpdir
+        | Unix.WEXITED 0 -> Builder.Exited 0, collect_output tmpdir
         | Unix.WEXITED c -> Builder.Exited c, []
         | Unix.WSIGNALED s -> Builder.Signalled s, []
         | Unix.WSTOPPED s -> Builder.Stopped s, []
