@@ -199,24 +199,28 @@ let upload url dir full =
     save_to_disk dir full
 
 let job_finished state uuid res data =
-  let now = Ptime_clock.now () in
-  let started, job, out =
-    match UM.find_opt uuid state.running with
-    | None -> Ptime.epoch, dummy.Builder.job, [] (* TODO emit an error out *)
-    | Some (c, j, cond, o) ->
-      let res_str = Fmt.to_to_string Builder.pp_execution_result res in
-      Lwt_condition.broadcast cond res_str;
-      c, j, o
-  in
+  let r = UM.find_opt uuid state.running in
   state.running <- UM.remove uuid state.running;
-  let full =
-    let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
-    let out = List.rev out in
-    job, uuid, out, started, now, res, data
-  in
-  match state.upload with
-  | None -> save_to_disk state.dir full
-  | Some url -> upload url state.dir full
+  match r with
+  | None ->
+    Logs.err (fun m -> m "no job found for uuid %a" Uuidm.pp uuid)
+  | Some (started, job, cond, out) ->
+    let now = Ptime_clock.now () in
+    let res_str = Fmt.to_to_string Builder.pp_execution_result res in
+    Lwt_condition.broadcast cond res_str;
+    let full =
+      let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
+      let out = List.rev out in
+      job, uuid, out, started, now, res, data
+    in
+    match
+      match state.upload with
+      | None -> save_to_disk state.dir full
+      | Some url -> upload url state.dir full
+    with
+    | Ok () -> ()
+    | Error (`Msg msg) ->
+       Logs.err (fun m -> m "error saving %s (%a) to disk: %s" job.name Uuidm.pp uuid msg)
 
 let handle t fd addr =
   (* -- client connection:
@@ -278,7 +282,7 @@ let handle t fd addr =
                 let timeout = Duration.(to_f (of_hour 1)) in
                 Lwt_unix.sleep timeout >>= fun () ->
                 Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
-                ignore (job_finished t uuid (Builder.Msg "timeout") []);
+                job_finished t uuid (Builder.Msg "timeout") [];
                 add_to_queue t job;
                 ignore (dump t);
                 Lwt.return (Ok ())
@@ -303,7 +307,7 @@ let handle t fd addr =
                 | Builder.Job_finished (uuid, r, data) ->
                   Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
                                Builder.pp_execution_result r);
-                  ignore (job_finished t uuid r data);
+                  job_finished t uuid r data;
                   Lwt.return (Ok ())
                 | cmd ->
                   Logs.err (fun m -> m "expected output of job finished, got %a"
@@ -316,7 +320,7 @@ let handle t fd addr =
       | Builder.Job_finished (uuid, r, data) ->
         Logs.app (fun m -> m "job %a immediately finished with %a" Uuidm.pp uuid
                      Builder.pp_execution_result r);
-        ignore (job_finished t uuid r data);
+        job_finished t uuid r data;
         Lwt.return (Ok ())
       | Builder.Schedule (p, j) ->
         Logs.app (fun m -> m "%a schedule %a" Builder.pp_period p
