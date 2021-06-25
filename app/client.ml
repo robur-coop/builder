@@ -137,7 +137,7 @@ let p : Builder.period Arg.converter =
 
 let period =
   let doc = "The periodic execution interval" in
-  Arg.(value & opt p Builder.Hourly & info [ "period" ] ~doc ~docv:"PERIOD")
+  Arg.(value & opt p Builder.Daily & info [ "period" ] ~doc ~docv:"PERIOD")
 
 let dir =
   let doc = "The directory with supplementary material to embed into the job" in
