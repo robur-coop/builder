@@ -407,8 +407,9 @@ let handle t fd addr =
                 (List.rev out) >>= fun () ->
               let rec more () =
                 Lwt_condition.wait cond >>= fun data ->
-                write_cmd fd (Builder.Output (id, data)) >>= fun _ ->
-                more ()
+                write_cmd fd (Builder.Output (id, data)) >>= function
+                | Ok () -> more ()
+                | Error _ -> Lwt.return (Ok ())
               in
               more ()
           | None ->
