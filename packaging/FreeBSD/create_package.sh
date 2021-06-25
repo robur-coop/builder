@@ -14,15 +14,20 @@ tmpd=$basedir/_build/stage
 manifest=$tmpd/+MANIFEST
 rootdir=$tmpd/rootdir
 sbindir=$rootdir/usr/local/sbin
-rcdir=$rootdir/usr/local/etc/rc.d
+etcdir=$rootdir/usr/local/etc
+confdir=$etcdir/builder
+rcdir=$etcdir/rc.d
 libexecdir=$rootdir/usr/local/libexec
 
 trap 'rm -rf $tmpd' 0 INT EXIT
 
-mkdir -p "$sbindir" "$libexecdir" "$rcdir"
+mkdir -p "$sbindir" "$libexecdir" "$rcdir" "$confdir"
 
 # stage service scripts
 install -U $pdir/rc.d/builder $rcdir/builder
+
+# stage templates
+install -U $pdir/orb-build.template $confdir/orb-build.template
 
 # stage app binaries
 install -U $bdir/builder-server $libexecdir/builder-server

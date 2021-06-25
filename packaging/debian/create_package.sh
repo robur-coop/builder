@@ -13,11 +13,12 @@ tmpd=$basedir/_build/stage
 rootdir=$tmpd/rootdir
 bindir=$rootdir/usr/bin
 systemddir=$rootdir/usr/lib/systemd/system
+confdir=$rootdir/etc/builder
 debiandir=$rootdir/DEBIAN
 
 trap 'rm -rf $tmpd' 0 INT EXIT
 
-mkdir -p "$bindir" "$debiandir" "$systemddir"
+mkdir -p "$bindir" "$debiandir" "$systemddir" "$confdir"
 
 # stage app binaries
 install $bdir/builder-server $bindir/builder-server
@@ -27,6 +28,9 @@ install $bdir/builder-worker $bindir/builder-worker
 # install service scripts
 install $basedir/Linux/builder.service $systemddir/builder.service
 install $basedir/Linux/builder-worker.service $systemddir/builder-worker.service
+
+# install templates
+install $basedir/debian/orb-build.template $confdir/orb-build.template
 
 # install debian metadata
 install $basedir/packaging/debian/control $debiandir/control

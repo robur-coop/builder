@@ -11,12 +11,20 @@ let pp_data ppf xs =
     ppf
     (List.map (fun (f, s) -> f, String.length s) xs)
 
-type job = {
+type script_job = {
   name : string ;
   script : string ;
 }
 
-let pp_job ppf { name ; _ } = Fmt.pf ppf "name %s" name
+let pp_script_job ppf { name ; _ } = Fmt.pf ppf "name %s" name
+
+type orb_build_job = {
+  name : string ;
+  opam_package : string ;
+}
+
+let pp_orb_build_job ppf { name ; opam_package } =
+  Fmt.pf ppf "name %s, opam %s" name opam_package
 
 type execution_result =
   | Exited of int
@@ -37,6 +45,21 @@ let pp_period ppf = function
   | Daily -> Fmt.string ppf "daily"
   | Weekly -> Fmt.string ppf "weekly"
 
+type job =
+  | Script_job of script_job
+  | Orb_build_job of orb_build_job
+
+let pp_job ppf = function
+  | Script_job j -> pp_script_job ppf j
+  | Orb_build_job j -> pp_orb_build_job ppf j
+
+ let job_name = function
+   | Script_job { name ; _ } -> name
+   | Orb_build_job { name ; _ } -> name
+
+let job_equal a b =
+   String.equal (job_name a) (job_name b)
+
 type schedule_item = {
   next : Ptime.t ;
   period : period ;
@@ -51,7 +74,7 @@ let pp_schedule_item ppf { next ; period ; job } =
 type info = {
   schedule : schedule_item list ;
   queue : job list ;
-  running : (Ptime.t * Uuidm.t * job) list ;
+  running : (Ptime.t * Uuidm.t * script_job) list ;
 }
 
 let triple ~sep pc pb pa ppf (va, vb, vc)=
@@ -64,23 +87,24 @@ let pp_info ppf { schedule ; queue ; running } =
     Fmt.(list ~sep:(unit ";@.") pp_schedule_item) schedule
     Fmt.(list ~sep:(unit ";@ ") pp_job) queue
     Fmt.(list ~sep:(unit ";@.")
-           (triple ~sep:(unit ",@,") pp_job Uuidm.pp pp_time)) running
+           (triple ~sep:(unit ",@,") pp_script_job Uuidm.pp pp_time)) running
 
 type cmd =
   | Client_hello of int
   | Server_hello of int
   | Job_requested
-  | Job_schedule of Uuidm.t * job
+  | Job_schedule of Uuidm.t * script_job
   | Job_finished of Uuidm.t * execution_result * data
   | Output of Uuidm.t * string
-  | Schedule of period * job
+  | Schedule of period * script_job
   | Unschedule of string
   | Info
   | Info_reply of info
   | Observe of Uuidm.t
   | Execute of string
+  | Schedule_orb_build of period * orb_build_job
 
-let cmds = 12
+let cmds = 13
 
 let version =
   Fmt.strf "version %%VERSION%% protocol version %d" cmds
@@ -90,18 +114,20 @@ let pp_cmd ppf = function
   | Server_hello max -> Fmt.pf ppf "server hello (max %d)" max
   | Job_requested -> Fmt.string ppf "job request"
   | Job_schedule (uuid, job) ->
-    Fmt.pf ppf "[%a] job schedule %a" Uuidm.pp uuid pp_job job
+    Fmt.pf ppf "[%a] job schedule %a" Uuidm.pp uuid pp_script_job job
   | Job_finished (uuid, result, data) ->
     Fmt.pf ppf "[%a] job finished with %a: %a" Uuidm.pp uuid
       pp_execution_result result pp_data data
   | Output (uuid, data) -> Fmt.pf ppf "[%a] %S" Uuidm.pp uuid data
   | Schedule (period, job) ->
-    Fmt.pf ppf "schedule at %a: %a" pp_period period pp_job job
+    Fmt.pf ppf "schedule at %a: %a" pp_period period pp_script_job job
   | Unschedule job_name -> Fmt.pf ppf "unschedule %s" job_name
   | Info -> Fmt.string ppf "info"
   | Info_reply info -> Fmt.pf ppf "info: %a" pp_info info
   | Observe id -> Fmt.pf ppf "observe %a" Uuidm.pp id
   | Execute name -> Fmt.pf ppf "execute %s" name
+  | Schedule_orb_build (period, orb_job) ->
+    Fmt.pf ppf "schedule orb build at %a: %a" pp_period period pp_orb_build_job orb_job
 
 type state_item =
   | Job of job
@@ -143,7 +169,7 @@ module Asn = struct
                    (required ~label:"path" utf8_string)
                    (required ~label:"data" utf8_string))))
 
-  let job =
+  let script_job =
     let f (name, script, _files) =
       { name ; script }
     and g { name ; script } =
@@ -153,6 +179,29 @@ module Asn = struct
                       (required ~label:"name" utf8_string)
                       (required ~label:"script" utf8_string)
                       (required ~label:"files" data)))
+
+  let orb_build_job =
+    let f (name, opam_package) =
+      { name ; opam_package }
+    and g { name ; opam_package } =
+      name, opam_package
+    in
+    Asn.S.(map f g (sequence2
+                      (required ~label:"name" utf8_string)
+                      (required ~label:"opam_package" utf8_string)))
+
+  let job =
+    let f = function
+     | `C1 j -> Script_job j
+     | `C2 j -> Orb_build_job j
+   and g = function
+     | Script_job j -> `C1 j
+     | Orb_build_job j -> `C2 j
+   in
+   Asn.S.(map f g
+     (choice2
+       (explicit 0 script_job)
+       (explicit 1 orb_build_job)))
 
   let period =
     let f = function
@@ -167,6 +216,15 @@ module Asn = struct
     Asn.S.(map f g
              (choice3 (explicit 0 null) (explicit 1 null) (explicit 2 null)))
 
+  let old_schedule =
+    let f (next, period, job) = {next; period; job = Script_job job}
+    and g _ = assert false
+    in
+    Asn.S.(map f g (sequence3
+                      (required ~label:"next" utc_time)
+                      (required ~label:"period" period)
+                      (required ~label:"job" script_job)))
+
   let schedule =
     let f (next, period, job) = {next; period; job}
     and g {next; period; job} = (next, period, job)
@@ -178,15 +236,19 @@ module Asn = struct
 
   let state_item =
     let f = function
-      | `C1 j -> Job j
+      | `C1 j -> Job (Script_job j)
       | `C2 s -> Schedule s
+      | `C3 j -> Job j
+      | `C4 e -> Schedule e
     and g = function
-      | Job j -> `C1 j
-      | Schedule s -> `C2 s
+      | Job j -> `C3 j
+      | Schedule s -> `C4 s
     in
-    Asn.S.(map f g (choice2
-                      (explicit 0 job)
-                      (explicit 1 schedule)))
+    Asn.S.(map f g (choice4
+                      (explicit 0 script_job)
+                      (explicit 1 old_schedule)
+                      (explicit 2 job)
+                      (explicit 3 schedule)))
 
   let state_of_cs, state_to_cs = projections_of (Asn.S.sequence_of state_item)
 
@@ -230,7 +292,7 @@ module Asn = struct
              (choice2
                 (explicit 0
                    (sequence6
-                      (required ~label:"job" job)
+                      (required ~label:"job" script_job)
                       (required ~label:"uuid" uuid)
                       (required ~label:"console"
                          (sequence_of (sequence2
@@ -261,6 +323,8 @@ module Asn = struct
       | `C2 `C4 jn -> Unschedule jn
       | `C2 `C5 id -> Observe id
       | `C2 `C6 jn -> Execute jn
+      | `C3 `C1 (period, orb_job) -> Schedule_orb_build (period, orb_job)
+      | `C3 `C2 () -> assert false
     and g = function
       | Client_hello max -> `C1 (`C1 max)
       | Server_hello max -> `C1 (`C2 max)
@@ -275,15 +339,16 @@ module Asn = struct
       | Unschedule jn -> `C2 (`C4 jn)
       | Observe id -> `C2 (`C5 id)
       | Execute jn -> `C2 (`C6 jn)
+      | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
     in
     Asn.S.(map f g
-             (choice2
+             (choice3
                 (choice6
                    (explicit 0 int)
                    (explicit 1 int)
                    (explicit 2 (sequence2
                                   (required ~label:"uuid" uuid)
-                                  (required ~label:"job" job)))
+                                  (required ~label:"job" script_job)))
                    (explicit 3 (sequence3
                                   (required ~label:"uuid" uuid)
                                   (required ~label:"result" res)
@@ -293,7 +358,7 @@ module Asn = struct
                                   (required ~label:"output" utf8_string)))
                    (explicit 5 (sequence2
                                   (required ~label:"period" period)
-                                  (required ~label:"job" job))))
+                                  (required ~label:"job" script_job))))
                 (choice6
                    (explicit 6 null)
                    (explicit 7 (sequence3
@@ -304,11 +369,16 @@ module Asn = struct
                                         (sequence3
                                            (required ~label:"started" utc_time)
                                            (required ~label:"uuid" uuid)
-                                           (required ~label:"job" job))))))
+                                           (required ~label:"job" script_job))))))
                    (explicit 8 null)
                    (explicit 9 utf8_string)
                    (explicit 10 uuid)
                    (explicit 11 utf8_string))
+                (choice2
+                   (explicit 12 (sequence2
+                     (required ~label:"period" period)
+                     (required ~label:"orb_build_job" orb_build_job)))
+                   (explicit 13 null))
                 ))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd

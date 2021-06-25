@@ -56,6 +56,11 @@ let schedule () remote name script period =
   connect remote >>= fun s ->
   Builder.write_cmd s (Builder.Schedule (period, job))
 
+let schedule_orb_build () remote name opam_package period =
+  let job = Builder.{ name ; opam_package } in
+  connect remote >>= fun s ->
+  Builder.write_cmd s (Builder.Schedule_orb_build (period, job))
+
 let help () man_format cmds = function
   | None -> `Help (`Pager, None)
   | Some t when List.mem t cmds -> `Help (man_format, Some t)
@@ -115,6 +120,10 @@ let script =
   let doc = "The script to execute" in
   Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"FILE")
 
+let opam_package =
+  let doc = "The opam package to build" in
+  Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"OPAM")
+
 let setup_log =
   Term.(const setup_log
         $ Fmt_cli.style_renderer ()
@@ -136,6 +145,10 @@ let schedule_cmd =
   Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period)),
   Term.info "schedule"
 
+let schedule_orb_build_cmd =
+  Term.(term_result (const schedule_orb_build $ setup_log $ remote $ nam $ opam_package $ period)),
+  Term.info "orb-build"
+
 let execute_cmd =
   Term.(term_result (const execute $ setup_log $ remote $ nam)),
   Term.info "execute"
@@ -145,6 +158,6 @@ let help_cmd =
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
   Term.info "builder" ~version:Builder.version ~doc
 
-let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_cmd ; execute_cmd ]
+let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ]
 
 let () = match Term.eval_choice help_cmd cmds with `Ok () -> exit 0 | _ -> exit 1

@@ -183,7 +183,7 @@ let jump () (host, port) =
   (match cmd with
    | Builder.Job_schedule (uuid, job) ->
      Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid
-                  Builder.pp_job job);
+                  Builder.pp_script_job job);
      let r, data = execute_job s uuid job in
      let fini = Builder.Job_finished (uuid, r, data) in
      submit_success s fini

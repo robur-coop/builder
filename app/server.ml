@@ -65,13 +65,13 @@ module S = Binary_heap.Make (struct
   end)
 
 let dummy =
-  let job = Builder.{ name = "dummy" ; script = "#nothing" } in
+  let job = Builder.(Script_job { name = "dummy" ; script = "#nothing" }) in
   Builder.{ next = Ptime.epoch ; period = Daily ; job }
 
 type t = {
   mutable queue : Builder.job Queue.t ;
   mutable schedule : S.t ;
-  mutable running : (Ptime.t * Builder.job * string Lwt_condition.t * (int64 * string) list) UM.t ;
+  mutable running : (Ptime.t * Builder.script_job * string Lwt_condition.t * (int64 * string) list) UM.t ;
   waiter : unit Lwt_condition.t ;
   dir : Fpath.t ;
   upload : string option ;
@@ -88,7 +88,7 @@ let p_to_span p =
 
 let add_to_queue t job =
   if Queue.fold (fun acc i ->
-      if acc then not (String.equal i.Builder.name job.Builder.name) else acc)
+      if acc then not (Builder.job_equal i job) else acc)
       true t.queue
   then begin
     Queue.add job t.queue;
@@ -163,7 +163,7 @@ let prepare_console out started now res =
   in
   started :: cons @ [ exited ; stopped ]
 
-let save_to_disk dir ((job, uuid, out, started, now, res, data) as full) =
+let save_to_disk dir (((job : Builder.script_job), uuid, out, started, now, res, data) as full) =
   let open Rresult.R.Infix in
   let out_dir = Fpath.(dir / job.Builder.name / Uuidm.to_string uuid) in
   Logs.info (fun m -> m "saving result to %a" Fpath.pp out_dir);
@@ -220,7 +220,29 @@ let job_finished state uuid res data =
     with
     | Ok () -> ()
     | Error (`Msg msg) ->
-       Logs.err (fun m -> m "error saving %s (%a) to disk: %s" job.name Uuidm.pp uuid msg)
+       Logs.err (fun m -> m "error saving %s (%a) to disk: %s" job.Builder.name Uuidm.pp uuid msg)
+
+let read_template () =
+  match
+    Bos.OS.File.read (Fpath.v "/etc/builder/orb-build.template"),
+    Bos.OS.File.read (Fpath.v "/usr/local/etc/builder/orb-build.template")
+  with
+  | Ok data, _ -> Ok data
+  | _, Ok data -> Ok data
+  | Error _ as e, _ ->
+    Logs.err (fun m -> m "couldn't read template in /etc/builder or /usr/local/etc/builder");
+    e
+
+let job_to_script_job = function
+  | Builder.Script_job j -> Ok j
+  | Builder.Orb_build_job { name ; opam_package } ->
+    match read_template () with
+    | Ok template ->
+      let script =
+        Astring.String.(concat ~sep:opam_package (cuts ~sep:"%%OPAM_PACKAGE%%" template))
+      in
+      Ok { name ; script }
+    | Error _ as e -> e
 
 let handle t fd addr =
   (* -- client connection:
@@ -245,6 +267,20 @@ let handle t fd addr =
   *)
   let open Lwt_result.Infix in
   Logs.app (fun m -> m "client connection from %a" pp_sockaddr addr);
+  let maybe_schedule_job p j =
+    if S.fold (fun { Builder.job ; _ } acc ->
+      if acc then not (Builder.job_equal job j) else acc)
+        t.schedule true
+      then
+        let now = Ptime_clock.now () in
+        schedule_job t now p j;
+        ignore (dump t);
+        Lwt.return (Ok ())
+      else begin
+        Logs.err (fun m -> m "job with same name already in schedule");
+        Lwt.return (Error (`Msg "job name already used"))
+      end
+  in
   read_cmd fd >>= function
   | Builder.Client_hello n when n = Builder.cmds ->
     write_cmd fd Builder.(Server_hello cmds) >>= fun () ->
@@ -271,10 +307,11 @@ let handle t fd addr =
             in
             ignore (dump t);
             let uuid = uuid_gen () in
-            put_back_on_err uuid (write_cmd fd (Builder.Job_schedule (uuid, job))) >>= fun () ->
+            Lwt_result.lift (job_to_script_job job) >>= fun script_job ->
+            put_back_on_err uuid (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= fun () ->
             Logs.app (fun m -> m "job %a scheduled %a for %a"
                          Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
-            t.running <- UM.add uuid (Ptime_clock.now (), job, Lwt_condition.create (), []) t.running;
+            t.running <- UM.add uuid (Ptime_clock.now (), script_job, Lwt_condition.create (), []) t.running;
             (* await output *)
             let rec read_or_timeout () =
               let timeout () =
@@ -325,32 +362,25 @@ let handle t fd addr =
         Lwt.return (Ok ())
       | Builder.Schedule (p, j) ->
         Logs.app (fun m -> m "%a schedule %a" Builder.pp_period p
-                     Builder.pp_job j);
-        if S.fold (fun { Builder.job ; _ } acc ->
-            if acc then not (String.equal job.Builder.name j.Builder.name) else acc)
-            t.schedule true
-        then
-          let now = Ptime_clock.now () in
-          schedule_job t now p j;
-          ignore (dump t);
-          Lwt.return (Ok ())
-        else begin
-          Logs.err (fun m -> m "job with same name already in schedule");
-          Lwt.return (Error (`Msg "job name already used"))
-        end
+                     Builder.pp_script_job j);
+        maybe_schedule_job p (Builder.Script_job j)
+      | Builder.Schedule_orb_build (p, j) ->
+        Logs.app (fun m -> m "%a schedule orb build %a" Builder.pp_period p
+                     Builder.pp_orb_build_job j);
+        maybe_schedule_job p (Builder.Orb_build_job j)
       | Builder.Unschedule name ->
         Logs.app (fun m -> m "unschedule %s" name);
         let schedule =
           let s = S.create ~dummy 13 in
           S.iter (fun ({ Builder.job ; _ } as si) ->
-              if not (String.equal job.Builder.name name) then
+              if not (String.equal (Builder.job_name job) name) then
                 S.add s si
               else ()) t.schedule;
           s
         and queue =
           let q = Queue.create () in
           Queue.iter (fun job ->
-              if not (String.equal job.Builder.name name) then
+              if not (String.equal (Builder.job_name job) name) then
                 Queue.add job q
               else
                 ())
@@ -367,7 +397,7 @@ let handle t fd addr =
           (* first we look through the schedule to find <name> *)
           let s = S.create ~dummy 13 in
           match S.fold (fun ({ Builder.job ; period ; _ } as si) j ->
-              match j, String.equal job.Builder.name name with
+              match j, String.equal (Builder.job_name job) name with
               | None, true -> Some (job, period)
               | Some _, true ->
                 (* violates our policy: there ain't multiple jobs with same name *)
