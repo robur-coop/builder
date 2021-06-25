@@ -30,7 +30,7 @@ install $basedir/Linux/builder.service $systemddir/builder.service
 install $basedir/Linux/builder-worker.service $systemddir/builder-worker.service
 
 # install templates
-install $basedir/debian/orb-build.template $confdir/orb-build.template
+install $basedir/packaging/debian/orb-build.template $confdir/orb-build.template
 
 # install debian metadata
 install $basedir/packaging/debian/control $debiandir/control
