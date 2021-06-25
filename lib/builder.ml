@@ -16,8 +16,7 @@ type job = {
   script : string ;
 }
 
-let pp_job ppf { name ; script } =
-  Fmt.pf ppf "name %s, script %d" name (String.length script)
+let pp_job ppf { name ; _ } = Fmt.pf ppf "name %s" name
 
 type execution_result =
   | Exited of int
@@ -45,8 +44,9 @@ type schedule_item = {
 }
 
 let pp_schedule_item ppf { next ; period ; job } =
-  Fmt.pf ppf "next %a, %a: %a" (Ptime.pp_rfc3339 ()) next
-    pp_period period pp_job job
+  Fmt.pf ppf "%a next %a, scheduled %a" pp_job job
+    (Ptime.pp_rfc3339 ()) next
+    pp_period period
 
 type info = {
   schedule : schedule_item list ;
@@ -54,17 +54,17 @@ type info = {
   running : (Ptime.t * Uuidm.t * job) list ;
 }
 
-let triple ~sep pa pb pc ppf (va, vb, vc)=
-  Fmt.pair ~sep pa (Fmt.pair ~sep pb pc) ppf
-    (va, (vb, vc))
+let triple ~sep pc pb pa ppf (va, vb, vc)=
+  Fmt.pair ~sep pc (Fmt.pair ~sep pb pa) ppf
+    (vc, (vb, va))
 
 let pp_info ppf { schedule ; queue ; running } =
   let pp_time = Ptime.pp_rfc3339 () in
-  Fmt.pf ppf "schedule: %a@.queue: %a@.running: %a@."
-    Fmt.(list ~sep:(unit ";@ ") pp_schedule_item) schedule
+  Fmt.pf ppf "schedule:@.%a@.queue: %a@.running:@.%a@."
+    Fmt.(list ~sep:(unit ";@.") pp_schedule_item) schedule
     Fmt.(list ~sep:(unit ";@ ") pp_job) queue
-    Fmt.(list ~sep:(unit ";@ ")
-           (triple ~sep:(unit ",@,") pp_time Uuidm.pp pp_job)) running
+    Fmt.(list ~sep:(unit ";@.")
+           (triple ~sep:(unit ",@,") pp_job Uuidm.pp pp_time)) running
 
 type cmd =
   | Client_hello of int
