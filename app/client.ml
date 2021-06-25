@@ -122,7 +122,7 @@ let script =
 
 let opam_package =
   let doc = "The opam package to build" in
-  Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"OPAM")
+  Arg.(required & pos 1 (some string) None & info [ ] ~doc ~docv:"OPAM")
 
 let setup_log =
   Term.(const setup_log
