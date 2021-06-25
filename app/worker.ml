@@ -52,25 +52,6 @@ let collect_output files tmpdir =
       Logs.warn (fun m -> m "folding resulted in an error %s" msg);
       []
   in
-  let all_files =
-    List.fold_left (fun acc f ->
-        if String.equal Fpath.(basename (parent f)) "bin" then
-          let debug =
-            let path, name = Fpath.split_base f in
-            Fpath.(parent path // name + "debug")
-          in
-          match
-            Bos.OS.Cmd.run Bos.Cmd.(v "cp" % p f % p debug) >>= fun () ->
-            Bos.OS.Cmd.run Bos.Cmd.(v "strip" % p f)
-          with
-          | Ok () -> f :: debug :: acc
-          | Error `Msg msg ->
-            Logs.warn (fun m -> m "couldn't copy or strip %a: %s" Fpath.pp f msg);
-            f :: acc
-      else
-        f :: acc)
-      [] all_files
-  in
   List.fold_left (fun acc f ->
       match Fpath.rem_prefix tmpdir f with
       | None ->
