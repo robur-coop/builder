@@ -54,3 +54,4 @@ export SOURCE_DATE_EPOCH=$(git log -1 --pretty=format:%ct)
 pkg create -r "$rootdir" -M "$manifest" -o $basedir/
 mv $basedir/builder-*.txz $basedir/builder.txz
 echo 'bin: [ "builder.txz" ]' > $basedir/builder.install
+echo 'doc: [ "README.md" ]' >> $basedir/builder.install

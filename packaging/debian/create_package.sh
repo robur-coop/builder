@@ -39,3 +39,4 @@ install $basedir/packaging/debian/copyright $debiandir/copyright
 
 dpkg-deb --build $rootdir $basedir/builder.deb
 echo 'bin: [ "builder.deb" ]' > $basedir/builder.install
+echo 'doc: [ "README.md" ]' >> $basedir/builder.install
