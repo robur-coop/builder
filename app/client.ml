@@ -37,7 +37,9 @@ let observe_latest () remote =
              None running
      with
      | None -> Error (`Msg "No running jobs")
-     | Some (_start, uuid, _job) ->
+     | Some (_start, uuid, job) ->
+       Logs.app (fun m -> m "Observing %s (%a)" job.Builder.name Uuidm.pp uuid);
+       connect remote () >>= fun s ->
        Builder.write_cmd s (Builder.Observe uuid) >>= fun () ->
        let rec read () =
          Builder.read_cmd s >>= fun cmd ->
