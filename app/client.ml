@@ -22,6 +22,32 @@ let connect (host, port) =
                  Builder.pp_cmd cmd);
     Error (`Msg "bad communication")
 
+let observe_latest () remote =
+  connect remote >>= fun s ->
+  Builder.write_cmd s Builder.Info >>= fun () ->
+  Builder.read_cmd s >>= function
+  | Info_reply { Builder.running ; _ } ->
+    (match List.fold_left
+             (fun acc ((start, _, _) as x) ->
+                match acc with
+                | None -> Some x
+                | Some (start', _, _) ->
+                  if Ptime.is_later start ~than:start'
+                  then Some x else acc)
+             None running
+     with
+     | None -> Error (`Msg "No running jobs")
+     | Some (_start, uuid, _job) ->
+       Builder.write_cmd s (Builder.Observe uuid) >>= fun () ->
+       let rec read () =
+         Builder.read_cmd s >>= fun cmd ->
+         Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
+         read ()
+       in
+       read ())
+  | cmd -> Error (`Msg (Fmt.str "Unexpected reply to 'info': %a" Builder.pp_cmd cmd))
+
+
 let observe () remote id =
   match Uuidm.of_string id with
   | None -> Error (`Msg "error parsing uuid")
@@ -129,6 +155,10 @@ let setup_log =
         $ Fmt_cli.style_renderer ()
         $ Logs_cli.level ())
 
+let observe_latest_cmd =
+  Term.(term_result (const observe_latest $ setup_log $ remote)),
+  Term.info "observe-latest"
+
 let observe_cmd =
   Term.(term_result (const observe $ setup_log $ remote $ id)),
   Term.info "observe"
@@ -158,6 +188,6 @@ let help_cmd =
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
   Term.info "builder" ~version:Builder.version ~doc
 
-let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ]
+let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ]
 
 let () = match Term.eval_choice help_cmd cmds with `Ok () -> exit 0 | _ -> exit 1
