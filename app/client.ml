@@ -23,9 +23,9 @@ let connect (host, port) =
     Error (`Msg "bad communication")
 
 let observe_latest () remote =
-  connect remote >>= fun s ->
-  Builder.write_cmd s Builder.Info >>= fun () ->
-  Builder.read_cmd s >>= function
+  (connect remote >>= fun s ->
+   Builder.write_cmd s Builder.Info >>= fun () ->
+   let r = Builder.read_cmd s in Unix.close s; r) >>= function
   | Info_reply { Builder.running ; _ } ->
     (match List.fold_left
              (fun acc ((start, _, _) as x) ->
