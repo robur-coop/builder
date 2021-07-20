@@ -120,8 +120,9 @@ let host_port : (Unix.inet_addr * int) Arg.converter =
 
 let remote =
   let doc = "The remote host:port to connect to" in
+  let env = Term.env_info "BUILDER_REMOTE" in
   Arg.(value & opt host_port (Unix.inet_addr_loopback, 1234) &
-       info [ "r" ; "remote" ] ~doc ~docv:"IP:PORT")
+       info [ "r" ; "remote" ] ~env ~doc ~docv:"IP:PORT")
 
 let nam =
   let doc = "The job name" in
