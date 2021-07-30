@@ -244,6 +244,27 @@ let job_to_script_job = function
       Ok { name ; script }
     | Error _ as e -> e
 
+let reschedule_job t name f =
+  let s = S.create ~dummy 13 in
+  (* first we look through the schedule to find <name> *)
+  match S.fold (fun ({ Builder.job ; period ; next } as si) j ->
+      match j, String.equal (Builder.job_name job) name with
+      | None, true -> Some (job, period, next)
+      | Some _, true ->
+        (* violates our policy: there ain't multiple jobs with same name *)
+        assert false
+      | _, false -> S.add s si; j)
+      t.schedule None
+  with
+  | None ->
+    Logs.err (fun m -> m "couldn't find job %s" name);
+  | Some (job, period, next) ->
+    t.schedule <- s;
+    let job, period, next = f job period next in
+    schedule_job t next period job;
+    ignore (dump t);
+    Logs.app (fun m -> m "queued job %s" name)
+
 let handle t fd addr =
   (* -- client connection:
      (1) read client hello
@@ -394,26 +415,16 @@ let handle t fd addr =
       | Builder.Execute name ->
         begin
           Logs.app (fun m -> m "execute %s" name);
-          (* first we look through the schedule to find <name> *)
-          let s = S.create ~dummy 13 in
-          match S.fold (fun ({ Builder.job ; period ; _ } as si) j ->
-              match j, String.equal (Builder.job_name job) name with
-              | None, true -> Some (job, period)
-              | Some _, true ->
-                (* violates our policy: there ain't multiple jobs with same name *)
-                assert false
-              | _, false -> S.add s si; j)
-              t.schedule None
-          with
-          | None ->
-            Logs.err (fun m -> m "couldn't find job %s" name);
-            Lwt.return (Ok ())
-          | Some (job, period)  ->
-            t.schedule <- s;
-            schedule_job t (Ptime_clock.now ()) period job;
-            ignore (dump t);
-            Logs.app (fun m -> m "queued job %s" name);
-            Lwt.return (Ok ())
+          reschedule_job t name (fun job period _next ->
+              (job, period, (Ptime_clock.now ())));
+          Lwt.return (Ok ())
+        end
+      | Builder.Reschedule (name, next, period) ->
+        begin
+          Logs.app (fun m -> m "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next);
+          reschedule_job t name (fun job orig_period _orig_next ->
+              (job, Option.value ~default:orig_period period, next));
+          Lwt.return (Ok ())
         end
       | Builder.Info ->
         Logs.app (fun m -> m "info");
