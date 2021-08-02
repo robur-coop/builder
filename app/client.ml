@@ -149,6 +149,10 @@ let period =
   let doc = "The periodic execution interval" in
   Arg.(value & opt p Builder.Daily & info [ "period" ] ~doc ~docv:"PERIOD")
 
+let period_opt =
+  let doc = "The periodic execution interval" in
+  Arg.(value & opt (some p) None & info [ "period" ] ~doc ~docv:"PERIOD")
+
 let next =
   let ptime : Ptime.t Arg.converter =
     let parse s = match Ptime.of_rfc3339 s with
@@ -200,7 +204,7 @@ let schedule_orb_build_cmd =
   Term.info "orb-build"
 
 let reschedule_cmd =
-  Term.(term_result (const reschedule $ setup_log $ remote $ nam $ next $ const None)),
+  Term.(term_result (const reschedule $ setup_log $ remote $ nam $ next $ period_opt)),
   Term.info "reschedule"
 
 let execute_cmd =
