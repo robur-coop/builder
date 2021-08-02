@@ -13,7 +13,7 @@ depends: [
   "bheap"
   "bos"
   "cmdliner"
-  "cstruct"
+  "cstruct" {>= "6.0.0"}
   "duration"
   "fmt"
   "fpath"
