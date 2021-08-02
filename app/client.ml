@@ -89,6 +89,10 @@ let schedule_orb_build () remote name opam_package period =
   connect remote >>= fun s ->
   Builder.write_cmd s (Builder.Schedule_orb_build (period, job))
 
+let reschedule () remote name next period =
+  connect remote >>= fun s ->
+  Builder.write_cmd s (Builder.Reschedule (name, next, period))
+
 let help () man_format cmds = function
   | None -> `Help (`Pager, None)
   | Some t when List.mem t cmds -> `Help (man_format, Some t)
@@ -145,6 +149,23 @@ let period =
   let doc = "The periodic execution interval" in
   Arg.(value & opt p Builder.Daily & info [ "period" ] ~doc ~docv:"PERIOD")
 
+let period_opt =
+  let doc = "The periodic execution interval" in
+  Arg.(value & opt (some p) None & info [ "period" ] ~doc ~docv:"PERIOD")
+
+let next =
+  let ptime : Ptime.t Arg.converter =
+    let parse s = match Ptime.of_rfc3339 s with
+      | Ok (ptime, (None | Some 0), _) ->  `Ok ptime
+      | Ok (_, _, _) ->  `Error "I don't like the timezone :(" (* FIXME *)
+      | Error (`RFC3339 (_, e)) ->
+        `Error (Fmt.str "bad RFC3339 date: %a" Ptime.pp_rfc3339_error e)
+    in
+    parse, Ptime.pp_rfc3339 ()
+  in
+  let doc = "The next execution time (RFC3339 date)" in
+  Arg.(required & pos 1 (some ptime) None & info [ ] ~doc ~docv:"NEXT")
+
 let script =
   let doc = "The script to execute" in
   Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"FILE")
@@ -182,6 +203,10 @@ let schedule_orb_build_cmd =
   Term.(term_result (const schedule_orb_build $ setup_log $ remote $ nam $ opam_package $ period)),
   Term.info "orb-build"
 
+let reschedule_cmd =
+  Term.(term_result (const reschedule $ setup_log $ remote $ nam $ next $ period_opt)),
+  Term.info "reschedule"
+
 let execute_cmd =
   Term.(term_result (const execute $ setup_log $ remote $ nam)),
   Term.info "execute"
@@ -191,6 +216,6 @@ let help_cmd =
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
   Term.info "builder" ~version:Builder.version ~doc
 
-let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ]
+let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ]
 
 let () = match Term.eval_choice help_cmd cmds with `Ok () -> exit 0 | _ -> exit 1

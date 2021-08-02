@@ -103,8 +103,9 @@ type cmd =
   | Observe of Uuidm.t
   | Execute of string
   | Schedule_orb_build of period * orb_build_job
+  | Reschedule of string * Ptime.t * period option
 
-let cmds = 13
+let cmds = 14
 
 let version =
   Fmt.strf "version %%VERSION%% protocol version %d" cmds
@@ -128,6 +129,10 @@ let pp_cmd ppf = function
   | Execute name -> Fmt.pf ppf "execute %s" name
   | Schedule_orb_build (period, orb_job) ->
     Fmt.pf ppf "schedule orb build at %a: %a" pp_period period pp_orb_build_job orb_job
+  | Reschedule (name, next, None) ->
+    Fmt.pf ppf "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next
+  | Reschedule (name, next, Some period) ->
+    Fmt.pf ppf "reschedule %s at %a: %a" name pp_period period (Ptime.pp_rfc3339 ()) next
 
 type state_item =
   | Job of job
@@ -324,7 +329,7 @@ module Asn = struct
       | `C2 `C5 id -> Observe id
       | `C2 `C6 jn -> Execute jn
       | `C3 `C1 (period, orb_job) -> Schedule_orb_build (period, orb_job)
-      | `C3 `C2 () -> assert false
+      | `C3 `C2 (name, next, period) -> Reschedule (name, next, period)
     and g = function
       | Client_hello max -> `C1 (`C1 max)
       | Server_hello max -> `C1 (`C2 max)
@@ -340,6 +345,7 @@ module Asn = struct
       | Observe id -> `C2 (`C5 id)
       | Execute jn -> `C2 (`C6 jn)
       | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
+      | Reschedule (name, next, period) -> `C3 (`C2 (name, next, period))
     in
     Asn.S.(map f g
              (choice3
@@ -378,7 +384,10 @@ module Asn = struct
                    (explicit 12 (sequence2
                      (required ~label:"period" period)
                      (required ~label:"orb_build_job" orb_build_job)))
-                   (explicit 13 null))
+                   (explicit 13 (sequence3
+                     (required ~label:"name" utf8_string)
+                     (required ~label:"next" utc_time)
+                     (optional ~label:"period" period))))
                 ))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd
