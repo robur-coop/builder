@@ -28,8 +28,8 @@ depends: [
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
-  ["sh" "packaging/FreeBSD/create_package.sh"] {os = "freebsd"}
-  ["sh" "packaging/debian/create_package.sh"] {os-family = "debian"}
+  ["sh" "-ex" "packaging/FreeBSD/create_package.sh"] {os = "freebsd"}
+  ["sh" "-ex" "packaging/debian/create_package.sh"] {os-family = "debian"}
 ]
 
 synopsis: "Scheduling and executing shell jobs"
