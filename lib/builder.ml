@@ -147,7 +147,7 @@ module Asn = struct
   let decode_strict codec cs =
     match Asn.decode codec cs with
     | Ok (a, cs) ->
-      guard (Cstruct.len cs = 0) (`Msg "trailing bytes") >>= fun () ->
+      guard (Cstruct.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
       Ok a
     | Error (`Parse msg) -> Error (`Msg msg)
 
@@ -425,9 +425,9 @@ let write fd data =
         w b ~off:(written + off) (l - written)
     in
     let csl = Cstruct.create 8 in
-    Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.len data));
+    Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.length data));
     w (Cstruct.to_bytes csl) 8;
-    w (Cstruct.to_bytes data) (Cstruct.len data);
+    w (Cstruct.to_bytes data) (Cstruct.length data);
     Ok ()
   with
     Unix.Unix_error (err, f, _) ->

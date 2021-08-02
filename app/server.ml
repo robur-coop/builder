@@ -39,9 +39,9 @@ let write fd data =
           w b ~off:(written + off) (l - written)
       in
       let csl = Cstruct.create 8 in
-      Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.len data));
+      Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.length data));
       w (Cstruct.to_bytes csl) 8 >>= fun () ->
-      w (Cstruct.to_bytes data) (Cstruct.len data) >|= fun () ->
+      w (Cstruct.to_bytes data) (Cstruct.length data) >|= fun () ->
       Ok ())
     (fun e ->
        Logs.err (fun m -> m "Error while writing: %s" (Printexc.to_string e));
