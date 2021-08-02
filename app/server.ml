@@ -178,6 +178,7 @@ let save_to_disk dir (((job : Builder.script_job), uuid, out, started, now, res,
       ignore (Bos.OS.Dir.create (Fpath.parent p));
       ignore (Bos.OS.File.write p value))
     data;
+  Bos.OS.Dir.create Fpath.(out_dir / "input") >>= fun _ ->
   Bos.OS.File.write Fpath.(out_dir / "input" / "script.sh") job.Builder.script
 
 let upload url dir full =
