@@ -1,7 +1,7 @@
 open Rresult.R.Infix
 
-let connect (host, port) =
-  let connect () =
+let rec connect ?(old = false) (host, port) =
+  let connect_server () =
     try
       let sockaddr = Unix.ADDR_INET (host, port) in
       let s = Unix.(socket PF_INET SOCK_STREAM 0) in
@@ -12,15 +12,23 @@ let connect (host, port) =
       Logs.err (fun m -> m "unix error in %s: %s" f (Unix.error_message err));
       Error (`Msg "connect failure")
   in
-  connect () >>= fun s ->
-  let hello = Builder.(Client_hello cmds) in
+  connect_server () >>= fun s ->
+  let hello =
+    if old then
+      Builder.(Client_hello cmds)
+    else
+      Builder.(Client_hello2 (`Client, client_cmds))
+  in
   Builder.write_cmd s hello >>= fun () ->
-  Builder.read_cmd s >>= function
-  | Builder.Server_hello x when x = Builder.cmds -> Ok s
-  | cmd ->
-    Logs.err (fun m -> m "expected Server Hello with matching version, got %a"
-                 Builder.pp_cmd cmd);
+  match Builder.read_cmd s with
+  | Ok (Builder.Server_hello _ | Builder.Server_hello2) -> Ok s
+  | Ok cmd ->
+    Logs.err (fun m -> m "expected Server Hello, got %a" Builder.pp_cmd cmd);
     Error (`Msg "bad communication")
+  | Error (`Msg _) when old = false ->
+    Logs.warn (fun m -> m "retrying with old = true");
+    connect ~old:true (host, port)
+  | Error _ as e -> e
 
 let observe_latest () remote =
   (connect remote >>= fun s ->

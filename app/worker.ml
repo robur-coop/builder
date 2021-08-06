@@ -120,23 +120,33 @@ let jump () (host, port) =
   and timeout () = Unix.sleepf 2.
   in
   let disc_on_err s = function Ok x -> Ok x | Error _ as e -> disconnect s; e in
-  let init () =
+  let init ~old () =
     connect () >>= fun s ->
-    let hello = Builder.(Client_hello cmds) in
+    let hello =
+      if old then
+        Builder.(Client_hello cmds)
+      else
+        Builder.(Client_hello2 (`Worker, worker_cmds))
+    in
     disc_on_err s (Builder.write_cmd s hello) >>= fun () ->
     disc_on_err s (Builder.read_cmd s) >>| fun cmd ->
     s, cmd
   in
-  let rec establish () =
-    match init () with
+  let rec establish ~old () =
+    match init ~old () with
     | Error `Msg e ->
-      Logs.warn (fun m -> m "error %s connecting, trying again in a bit" e);
-      timeout ();
-      establish ()
+      Logs.warn (fun m -> m "error %s connecting" e);
+      if not old then
+        establish ~old:true ()
+      else begin
+        Logs.warn (fun m -> m "trying again in a bit");
+        timeout ();
+        establish ~old:false ()
+      end
     | Ok cmd -> Ok cmd
   in
   let good_server_hello s = function
-    | Builder.Server_hello x when x = Builder.cmds-> Ok ()
+    | Builder.Server_hello _ | Builder.Server_hello2 -> Ok ()
     | cmd ->
       Logs.err (fun m -> m "expected Server Hello with matching version, got %a"
                    Builder.pp_cmd cmd);
@@ -144,7 +154,7 @@ let jump () (host, port) =
       Error (`Msg "bad communication")
   in
   let rec hs () =
-    establish () >>= fun (s, cmd) ->
+    establish ~old:false () >>= fun (s, cmd) ->
     good_server_hello s cmd >>= fun () ->
     match
       disc_on_err s (Builder.write_cmd s Builder.Job_requested >>= fun () ->
@@ -160,24 +170,7 @@ let jump () (host, port) =
     | Ok () -> Ok ()
     | Error `Msg msg ->
       Logs.err (fun m -> m "error %s while submitting result" msg);
-      let rec try_again n =
-        match
-          timeout ();
-          establish ()
-        with
-        | Ok (s, cmd) ->
-          good_server_hello s cmd >>= fun () ->
-          begin match disc_on_err s (Builder.write_cmd s fini) with
-            | Ok () -> Ok ()
-            | Error `Msg msg ->
-              Logs.warn (fun m -> m "failed to submit result %s (n = %d)" msg n);
-              try_again (succ n)
-          end
-        | Error `Msg msg ->
-          Logs.warn (fun m -> m "failed to establish connection %s (n = %d)" msg n);
-          try_again (succ n)
-      in
-      try_again 0
+      Error (`Msg msg)
   in
   hs () >>= fun (s, cmd) ->
   (match cmd with

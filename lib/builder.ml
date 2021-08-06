@@ -92,23 +92,28 @@ let pp_info ppf { schedule ; queue ; running } =
 type cmd =
   | Client_hello of int
   | Server_hello of int
-  | Job_requested
-  | Job_schedule of Uuidm.t * script_job
-  | Job_finished of Uuidm.t * execution_result * data
-  | Output of Uuidm.t * string
-  | Schedule of period * script_job
-  | Unschedule of string
-  | Info
-  | Info_reply of info
-  | Observe of Uuidm.t
-  | Execute of string
-  | Schedule_orb_build of period * orb_build_job
-  | Reschedule of string * Ptime.t * period option
+  | Job_requested (* worker *)
+  | Job_schedule of Uuidm.t * script_job (* worker *)
+  | Job_finished of Uuidm.t * execution_result * data (* worker *)
+  | Output of Uuidm.t * string (* worker and client *)
+  | Schedule of period * script_job (* client *)
+  | Unschedule of string (* client *)
+  | Info (* client *)
+  | Info_reply of info (* client *)
+  | Observe of Uuidm.t (* client *)
+  | Execute of string (* client *)
+  | Schedule_orb_build of period * orb_build_job (* client *)
+  | Reschedule of string * Ptime.t * period option (* client *)
+  | Client_hello2 of [ `Client | `Worker ] * int
+  | Server_hello2
 
-let cmds = 14
+let cmds = 14 (* not used anymore, don't update *)
+let client_cmds = 9
+let worker_cmds = 4
 
 let version =
-  Fmt.strf "version %%VERSION%% protocol version %d" cmds
+  Fmt.strf "version %%VERSION%% protocol version %d (client %d worker %d)"
+    cmds client_cmds worker_cmds
 
 let pp_cmd ppf = function
   | Client_hello max -> Fmt.pf ppf "client hello (max %d)" max
@@ -133,6 +138,10 @@ let pp_cmd ppf = function
     Fmt.pf ppf "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next
   | Reschedule (name, next, Some period) ->
     Fmt.pf ppf "reschedule %s at %a: %a" name pp_period period (Ptime.pp_rfc3339 ()) next
+  | Client_hello2 (t, num) ->
+    Fmt.pf ppf "client hello2 %s %d"
+      (match t with `Client -> "client" | `Worker -> "worker") num
+  | Server_hello2 -> Fmt.string ppf "server hello2"
 
 type state_item =
   | Job of job
@@ -313,6 +322,18 @@ module Asn = struct
 
   let exec_of_cs, exec_to_cs = projections_of exec
 
+  let client_or_worker =
+    let f = function
+      | `C1 () -> `Client
+      | `C2 () -> `Worker
+    and g = function
+      | `Client -> `C1 ()
+      | `Worker -> `C2 ()
+    in
+    Asn.S.(map f g @@ choice2
+             (explicit 0 null)
+             (explicit 1 null))
+
   let cmd =
     let f = function
       | `C1 `C1 max -> Client_hello max
@@ -330,6 +351,8 @@ module Asn = struct
       | `C2 `C6 jn -> Execute jn
       | `C3 `C1 (period, orb_job) -> Schedule_orb_build (period, orb_job)
       | `C3 `C2 (name, next, period) -> Reschedule (name, next, period)
+      | `C3 `C3 (t, n) -> Client_hello2 (t, n)
+      | `C3 `C4 () -> Server_hello2
     and g = function
       | Client_hello max -> `C1 (`C1 max)
       | Server_hello max -> `C1 (`C2 max)
@@ -346,6 +369,8 @@ module Asn = struct
       | Execute jn -> `C2 (`C6 jn)
       | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
       | Reschedule (name, next, period) -> `C3 (`C2 (name, next, period))
+      | Client_hello2 (t, n) -> `C3 (`C3 (t, n))
+      | Server_hello2 -> `C3 (`C4 ())
     in
     Asn.S.(map f g
              (choice3
@@ -380,15 +405,19 @@ module Asn = struct
                    (explicit 9 utf8_string)
                    (explicit 10 uuid)
                    (explicit 11 utf8_string))
-                (choice2
+                (choice4
                    (explicit 12 (sequence2
                      (required ~label:"period" period)
                      (required ~label:"orb_build_job" orb_build_job)))
                    (explicit 13 (sequence3
                      (required ~label:"name" utf8_string)
                      (required ~label:"next" utc_time)
-                     (optional ~label:"period" period))))
-                ))
+                     (optional ~label:"period" period)))
+                   (explicit 14 (sequence2
+                     (required ~label:"typ" client_or_worker)
+                     (required ~label:"version" int)))
+                   (explicit 15 null)
+                )))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd
 end
