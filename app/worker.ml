@@ -227,6 +227,6 @@ let setup_log =
 
 let cmd =
   Term.(term_result (const jump $ setup_log $ remote)),
-  Term.info "builder-client" ~version:Builder.version
+  Term.info "builder-worker" ~version:Builder.version
 
 let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1

@@ -214,7 +214,7 @@ let execute_cmd =
 let help_cmd =
   let doc = "Builder client" in
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
-  Term.info "builder" ~version:Builder.version ~doc
+  Term.info "builder-client" ~version:Builder.version ~doc
 
 let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ]
 
