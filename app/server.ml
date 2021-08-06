@@ -151,35 +151,13 @@ let dump, restore =
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
-let prepare_console out started now res =
-  let cons =
-    List.map (fun (delta, txt) ->
-        Printf.sprintf "%dms: %S" (Duration.to_ms (Int64.of_int delta)) txt)
-      (List.rev out)
-  in
-  let started = "started at " ^ Ptime.to_rfc3339 started
-  and stopped = "stopped at " ^ Ptime.to_rfc3339 now
-  and exited = Fmt.to_to_string Builder.pp_execution_result res
-  in
-  started :: cons @ [ exited ; stopped ]
-
-let save_to_disk dir (((job : Builder.script_job), uuid, out, started, now, res, data) as full) =
+let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full) =
   let open Rresult.R.Infix in
   let out_dir = Fpath.(dir / job.Builder.name / Uuidm.to_string uuid) in
   Logs.info (fun m -> m "saving result to %a" Fpath.pp out_dir);
   Bos.OS.Dir.create out_dir >>= fun _ ->
   let full_cs = Builder.Asn.exec_to_cs full in
-  Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs) >>= fun () ->
-  let console = prepare_console out started now res in
-  Bos.OS.File.write_lines Fpath.(out_dir / "console.log") console >>= fun () ->
-  let out = Fpath.(out_dir / "output") in
-  List.iter (fun (path, value) ->
-      let p = Fpath.append out path in
-      ignore (Bos.OS.Dir.create (Fpath.parent p));
-      ignore (Bos.OS.File.write p value))
-    data;
-  Bos.OS.Dir.create Fpath.(out_dir / "input") >>= fun _ ->
-  Bos.OS.File.write Fpath.(out_dir / "input" / "script.sh") job.Builder.script
+  Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs)
 
 let upload url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
