@@ -18,6 +18,13 @@
    bos bheap ptime.clock.os duration curly))
 
 (executable
+ (name inspect)
+ (public_name builder-inspect)
+ (modules inspect)
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty bos rresult
+    duration))
+
+(executable
  (name test)
  (public_name test)
  (modules test)

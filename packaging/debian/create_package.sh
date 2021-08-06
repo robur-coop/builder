@@ -24,6 +24,7 @@ mkdir -p "$bindir" "$debiandir" "$systemddir" "$confdir"
 install $bdir/builder-server $bindir/builder-server
 install $bdir/builder-client $bindir/builder-client
 install $bdir/builder-worker $bindir/builder-worker
+install $bdir/builder-inspect $bindir/builder-inspect
 
 # install service scripts
 install $basedir/Linux/builder.service $systemddir/builder.service

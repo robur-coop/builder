@@ -34,6 +34,7 @@ install -U $bdir/builder-server $libexecdir/builder-server
 install -U $bdir/builder-worker $libexecdir/builder-worker
 
 install -U $bdir/builder-client $sbindir/builder-client
+install -U $bdir/builder-inspect $sbindir/builder-inspect
 
 # create +MANIFEST
 flatsize=$(find "$rootdir" -type f -exec stat -f %z {} + |
