@@ -161,20 +161,20 @@ let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full)
 
 let upload url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
-  match Curly.(run (Request.make ~url ~meth:`POST ~body ())) with
-  | Ok x ->
-    let code = x.Curly.Response.code in
-    if code >= 200 && code < 300 then begin
-      Logs.info (fun m -> m "successful upload (HTTP %d)" code);
+  Http_lwt_client.one_request ~meth:`POST ~body url >|= function
+  | Ok (resp, body) ->
+    if Http_lwt_client.Status.is_successful resp.Http_lwt_client.status then begin
+      Logs.info (fun m -> m "successful upload (HTTP %s)"
+                    (Http_lwt_client.Status.to_string resp.Http_lwt_client.status));
       Ok ()
     end else begin
-      Logs.err (fun m -> m "upload failed (HTTP %d, body: %s), saving to %a"
-                   code x.Curly.Response.body Fpath.pp dir);
+      Logs.err (fun m -> m "upload failed (HTTP %s, body: %s), saving to %a"
+                   (Http_lwt_client.Status.to_string resp.Http_lwt_client.status)
+                   (match body with None -> "" | Some x -> x) Fpath.pp dir);
       save_to_disk dir full
     end
-  | Error e ->
-    Logs.err (fun m -> m "upload failed %a, saving to %a"
-                 Curly.Error.pp e Fpath.pp dir);
+  | Error `Msg e ->
+    Logs.err (fun m -> m "upload failed %s, saving to %a" e Fpath.pp dir);
     save_to_disk dir full
 
 let job_finished state uuid res data =
@@ -182,7 +182,8 @@ let job_finished state uuid res data =
   state.running <- UM.remove uuid state.running;
   match r with
   | None ->
-    Logs.err (fun m -> m "no job found for uuid %a" Uuidm.pp uuid)
+    Logs.err (fun m -> m "no job found for uuid %a" Uuidm.pp uuid);
+    Lwt.return_unit
   | Some (started, job, cond, out) ->
     let now = Ptime_clock.now () in
     let res_str = Fmt.to_to_string Builder.pp_execution_result res in
@@ -192,14 +193,13 @@ let job_finished state uuid res data =
       let out = List.rev out in
       job, uuid, out, started, now, res, data
     in
-    match
-      match state.upload with
-      | None -> save_to_disk state.dir full
-      | Some url -> upload url state.dir full
-    with
+    (match state.upload with
+     | None -> Lwt.return (save_to_disk state.dir full)
+     | Some url -> upload url state.dir full) >|= function
     | Ok () -> ()
     | Error (`Msg msg) ->
-       Logs.err (fun m -> m "error saving %s (%a) to disk: %s" job.Builder.name Uuidm.pp uuid msg)
+      Logs.err (fun m -> m "error saving %s (%a) to disk: %s"
+                   job.Builder.name Uuidm.pp uuid msg)
 
 let read_template () =
   match
@@ -325,10 +325,10 @@ let handle t fd addr =
             let timeout = Duration.(to_f (of_hour 1)) in
             Lwt_unix.sleep timeout >>= fun () ->
             Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
-            job_finished t uuid (Builder.Msg "timeout") [];
+            job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
             add_to_queue t job;
             ignore (dump t);
-            Lwt.return (Ok ())
+            Ok ()
           in
           let read_and_process_data () =
             put_back_on_err uuid (read_cmd fd) >>= function
@@ -350,8 +350,7 @@ let handle t fd addr =
             | Builder.Job_finished (uuid, r, data) ->
               Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
                            Builder.pp_execution_result r);
-              job_finished t uuid r data;
-              Lwt.return (Ok ())
+              Lwt_result.ok (job_finished t uuid r data)
             | cmd ->
               Logs.err (fun m -> m "expected output or job finished, got %a"
                            Builder.pp_cmd cmd);

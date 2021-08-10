@@ -22,7 +22,7 @@ depends: [
   "ptime"
   "rresult"
   "uuidm"
-  "curly"
+  "http-lwt-client" {>= "0.0.2"}
   "base64"
 ]
 build: [
