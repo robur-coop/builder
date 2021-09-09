@@ -37,6 +37,7 @@ install $basedir/packaging/debian/orb-build.template $confdir/orb-build.template
 install $basedir/packaging/debian/control $debiandir/control
 install $basedir/packaging/debian/changelog $debiandir/changelog
 install $basedir/packaging/debian/copyright $debiandir/copyright
+install $basedir/packaging/debian/conffiles $debiandir/conffiles
 
 dpkg-deb --build $rootdir $basedir/builder.deb
 echo 'bin: [ "builder.deb" ]' > $basedir/builder.install
