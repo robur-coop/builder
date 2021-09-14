@@ -7,7 +7,7 @@ bug-reports: "https://github.com/roburio/builder/issues"
 license: "ISC"
 
 depends: [
-  "ocaml" {>= "4.08.0"}
+  "ocaml" {>= "4.10.0"}
   "dune" {>= "2.0.0"}
   "asn1-combinators"
   "bheap"
@@ -33,3 +33,14 @@ build: [
 ]
 
 synopsis: "Scheduling and executing shell jobs"
+description: """
+The builder server has a schedule of jobs to be executed, stored persistently
+on disk. Any number of workers can connect via TCP (using ASN.1 encoded
+messages) that execute a single job -- usually contained in a sandbox (FreeBSD
+jail or Docker container). A client is a command-line interface to modify the
+schedule. Access control is out of scope - run it locally on your build host.
+The server receives the output artifacts of each job, and either stores them
+on the local file system or upload them to a remote server via http.
+
+See https://builds.robur.coop for the live web frontend (builder-web).
+"""
