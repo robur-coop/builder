@@ -75,6 +75,7 @@ type t = {
   waiter : unit Lwt_condition.t ;
   dir : Fpath.t ;
   upload : string option ;
+  he : Happy_eyeballs_lwt.t ;
 }
 
 let p_to_span p =
@@ -133,11 +134,12 @@ let dump, restore =
      let queue = Queue.create ()
      and schedule = S.create ~dummy 13
      and waiter = Lwt_condition.create ()
+     and he = Happy_eyeballs_lwt.create ()
      in
      Bos.OS.File.exists to_read >>= function
      | false ->
        Logs.warn (fun m -> m "state file does not exist, using empty");
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload }
+       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he }
      | true ->
        Bos.OS.File.read to_read >>= fun data ->
        Builder.Asn.state_of_cs (Cstruct.of_string data) >>= fun items ->
@@ -147,7 +149,7 @@ let dump, restore =
              | Builder.Schedule s -> S.add schedule s; (queue, schedule))
            (queue, schedule) items
        in
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload })
+       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he })
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
@@ -159,9 +161,9 @@ let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full)
   let full_cs = Builder.Asn.exec_to_cs full in
   Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs)
 
-let upload url dir full =
+let upload happy_eyeballs url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
-  Http_lwt_client.one_request ~meth:`POST ~body url >|= function
+  Http_lwt_client.one_request ~happy_eyeballs ~meth:`POST ~body url >|= function
   | Ok (resp, body) ->
     if Http_lwt_client.Status.is_successful resp.Http_lwt_client.status then begin
       Logs.info (fun m -> m "successful upload (HTTP %s)"
@@ -195,7 +197,7 @@ let job_finished state uuid res data =
     in
     (match state.upload with
      | None -> Lwt.return (save_to_disk state.dir full)
-     | Some url -> upload url state.dir full) >|= function
+     | Some url -> upload state.he url state.dir full) >|= function
     | Ok () -> ()
     | Error (`Msg msg) ->
       Logs.err (fun m -> m "error saving %s (%a) to disk: %s"
