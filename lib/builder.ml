@@ -6,8 +6,8 @@ open Rresult.R.Infix
 type data = (Fpath.t * string) list
 
 let pp_data ppf xs =
-  Fmt.(list ~sep:(unit "@.")
-         (pair ~sep:(unit ": ") Fpath.pp int))
+  Fmt.(list ~sep:(any "@.")
+         (pair ~sep:(any ": ") Fpath.pp int))
     ppf
     (List.map (fun (f, s) -> f, String.length s) xs)
 
@@ -84,10 +84,10 @@ let triple ~sep pc pb pa ppf (va, vb, vc)=
 let pp_info ppf { schedule ; queue ; running } =
   let pp_time = Ptime.pp_rfc3339 () in
   Fmt.pf ppf "schedule:@.%a@.queue: %a@.running:@.%a@."
-    Fmt.(list ~sep:(unit ";@.") pp_schedule_item) schedule
-    Fmt.(list ~sep:(unit ";@ ") pp_job) queue
-    Fmt.(list ~sep:(unit ";@.")
-           (triple ~sep:(unit ",@,") pp_script_job Uuidm.pp pp_time)) running
+    Fmt.(list ~sep:(any ";@.") pp_schedule_item) schedule
+    Fmt.(list ~sep:(any ";@ ") pp_job) queue
+    Fmt.(list ~sep:(any ";@.")
+           (triple ~sep:(any ",@,") pp_script_job Uuidm.pp pp_time)) running
 
 type cmd =
   | Client_hello of int
@@ -112,7 +112,7 @@ let client_cmds = 9
 let worker_cmds = 4
 
 let version =
-  Fmt.strf "version %%VERSION%% protocol version %d (client %d worker %d)"
+  Fmt.str "version %%VERSION%% protocol version %d (client %d worker %d)"
     cmds client_cmds worker_cmds
 
 let pp_cmd ppf = function
@@ -153,7 +153,7 @@ let pp_state_item ppf = function
 
 type state = state_item list
 
-let pp_state = Fmt.(list ~sep:(unit ";@ ") pp_state_item)
+let pp_state = Fmt.(list ~sep:(any ";@ ") pp_state_item)
 
 module Asn = struct
   let guard p err = if p then Ok () else Error err
