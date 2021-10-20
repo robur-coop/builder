@@ -20,7 +20,6 @@ depends: [
   "logs"
   "lwt"
   "ptime"
-  "rresult"
   "uuidm"
   "http-lwt-client" {>= "0.0.4"}
   "base64"

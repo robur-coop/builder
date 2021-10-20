@@ -1,8 +1,6 @@
 let src = Logs.Src.create "builder" ~doc:"Builder"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-open Rresult.R.Infix
-
 type data = (Fpath.t * string) list
 
 let pp_data ppf xs =
@@ -156,13 +154,13 @@ type state = state_item list
 let pp_state = Fmt.(list ~sep:(any ";@ ") pp_state_item)
 
 module Asn = struct
-  let guard p err = if p then Ok () else Error err
-
   let decode_strict codec cs =
     match Asn.decode codec cs with
     | Ok (a, cs) ->
-      guard (Cstruct.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
-      Ok a
+      if Cstruct.length cs = 0 then
+        Ok a
+      else
+        Error (`Msg "trailing bytes")
     | Error (`Parse msg) -> Error (`Msg msg)
 
   let projections_of asn =
@@ -425,6 +423,8 @@ end
 let rec ign_intr f v =
   try f v with Unix.Unix_error (Unix.EINTR, _, _) -> ign_intr f v
 
+let (let*) = Result.bind
+
 let read fd =
   try
     let rec r b ?(off = 0) l =
@@ -438,11 +438,11 @@ let read fd =
           r b ~off:(read + off) (l - read)
     in
     let bl = Bytes.create 8 in
-    r bl 8 >>= fun () ->
+    let* () = r bl 8 in
     let l = Cstruct.BE.get_uint64 (Cstruct.of_bytes bl) 0 in
     let l_int = Int64.to_int l in (* TODO *)
     let b = Bytes.create l_int in
-    r b l_int >>= fun () ->
+    let* () = r b l_int in
     Ok (Cstruct.of_bytes b)
   with
     Unix.Unix_error (err, f, _) ->
@@ -450,7 +450,7 @@ let read fd =
     Error (`Msg "unix error in read")
 
 let read_cmd fd =
-  read fd >>= fun data ->
+  let* data = read fd in
   Asn.cmd_of_cs data
 
 let write fd data =
