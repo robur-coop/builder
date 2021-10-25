@@ -15,12 +15,11 @@ depends: [
   "cmdliner"
   "cstruct" {>= "6.0.0"}
   "duration"
-  "fmt"
+  "fmt" {>= "0.8.7"}
   "fpath"
   "logs"
   "lwt"
   "ptime"
-  "rresult"
   "uuidm"
   "http-lwt-client" {>= "0.0.4"}
   "base64"

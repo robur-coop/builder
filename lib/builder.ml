@@ -1,13 +1,11 @@
 let src = Logs.Src.create "builder" ~doc:"Builder"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-open Rresult.R.Infix
-
 type data = (Fpath.t * string) list
 
 let pp_data ppf xs =
-  Fmt.(list ~sep:(unit "@.")
-         (pair ~sep:(unit ": ") Fpath.pp int))
+  Fmt.(list ~sep:(any "@.")
+         (pair ~sep:(any ": ") Fpath.pp int))
     ppf
     (List.map (fun (f, s) -> f, String.length s) xs)
 
@@ -84,10 +82,10 @@ let triple ~sep pc pb pa ppf (va, vb, vc)=
 let pp_info ppf { schedule ; queue ; running } =
   let pp_time = Ptime.pp_rfc3339 () in
   Fmt.pf ppf "schedule:@.%a@.queue: %a@.running:@.%a@."
-    Fmt.(list ~sep:(unit ";@.") pp_schedule_item) schedule
-    Fmt.(list ~sep:(unit ";@ ") pp_job) queue
-    Fmt.(list ~sep:(unit ";@.")
-           (triple ~sep:(unit ",@,") pp_script_job Uuidm.pp pp_time)) running
+    Fmt.(list ~sep:(any ";@.") pp_schedule_item) schedule
+    Fmt.(list ~sep:(any ";@ ") pp_job) queue
+    Fmt.(list ~sep:(any ";@.")
+           (triple ~sep:(any ",@,") pp_script_job Uuidm.pp pp_time)) running
 
 type cmd =
   | Client_hello of int
@@ -112,7 +110,7 @@ let client_cmds = 9
 let worker_cmds = 4
 
 let version =
-  Fmt.strf "version %%VERSION%% protocol version %d (client %d worker %d)"
+  Fmt.str "version %%VERSION%% protocol version %d (client %d worker %d)"
     cmds client_cmds worker_cmds
 
 let pp_cmd ppf = function
@@ -153,16 +151,16 @@ let pp_state_item ppf = function
 
 type state = state_item list
 
-let pp_state = Fmt.(list ~sep:(unit ";@ ") pp_state_item)
+let pp_state = Fmt.(list ~sep:(any ";@ ") pp_state_item)
 
 module Asn = struct
-  let guard p err = if p then Ok () else Error err
-
   let decode_strict codec cs =
     match Asn.decode codec cs with
     | Ok (a, cs) ->
-      guard (Cstruct.length cs = 0) (`Msg "trailing bytes") >>= fun () ->
-      Ok a
+      if Cstruct.length cs = 0 then
+        Ok a
+      else
+        Error (`Msg "trailing bytes")
     | Error (`Parse msg) -> Error (`Msg msg)
 
   let projections_of asn =
@@ -425,6 +423,8 @@ end
 let rec ign_intr f v =
   try f v with Unix.Unix_error (Unix.EINTR, _, _) -> ign_intr f v
 
+let (let*) = Result.bind
+
 let read fd =
   try
     let rec r b ?(off = 0) l =
@@ -438,11 +438,11 @@ let read fd =
           r b ~off:(read + off) (l - read)
     in
     let bl = Bytes.create 8 in
-    r bl 8 >>= fun () ->
+    let* () = r bl 8 in
     let l = Cstruct.BE.get_uint64 (Cstruct.of_bytes bl) 0 in
     let l_int = Int64.to_int l in (* TODO *)
     let b = Bytes.create l_int in
-    r b l_int >>= fun () ->
+    let* () = r b l_int in
     Ok (Cstruct.of_bytes b)
   with
     Unix.Unix_error (err, f, _) ->
@@ -450,7 +450,7 @@ let read fd =
     Error (`Msg "unix error in read")
 
 let read_cmd fd =
-  read fd >>= fun data ->
+  let* data = read fd in
   Asn.cmd_of_cs data
 
 let write fd data =

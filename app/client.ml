@@ -1,4 +1,4 @@
-open Rresult.R.Infix
+let (let*) = Result.bind
 
 let rec connect ?(old = false) (host, port) =
   let connect_server () =
@@ -12,14 +12,14 @@ let rec connect ?(old = false) (host, port) =
       Logs.err (fun m -> m "unix error in %s: %s" f (Unix.error_message err));
       Error (`Msg "connect failure")
   in
-  connect_server () >>= fun s ->
+  let* s = connect_server () in
   let hello =
     if old then
       Builder.(Client_hello cmds)
     else
       Builder.(Client_hello2 (`Client, client_cmds))
   in
-  Builder.write_cmd s hello >>= fun () ->
+  let* () = Builder.write_cmd s hello in
   match Builder.read_cmd s with
   | Ok (Builder.Server_hello _ | Builder.Server_hello2) -> Ok s
   | Ok cmd ->
@@ -31,9 +31,14 @@ let rec connect ?(old = false) (host, port) =
   | Error _ as e -> e
 
 let observe_latest () remote =
-  (connect remote >>= fun s ->
-   Builder.write_cmd s Builder.Info >>= fun () ->
-   let r = Builder.read_cmd s in Unix.close s; r) >>= function
+  let* reply =
+    let* s = connect remote in
+    let* () = Builder.write_cmd s Builder.Info in
+    let r = Builder.read_cmd s in
+    Unix.close s;
+    r
+  in
+  match reply with
   | Info_reply { Builder.running ; _ } ->
     (match List.fold_left
              (fun acc ((start, _, _) as x) ->
@@ -47,10 +52,10 @@ let observe_latest () remote =
      | None -> Error (`Msg "No running jobs")
      | Some (_start, uuid, job) ->
        Logs.app (fun m -> m "Observing %s (%a)" job.Builder.name Uuidm.pp uuid);
-       connect remote >>= fun s ->
-       Builder.write_cmd s (Builder.Observe uuid) >>= fun () ->
+       let* s = connect remote in
+       let* () = Builder.write_cmd s (Builder.Observe uuid) in
        let rec read () =
-         Builder.read_cmd s >>= fun cmd ->
+         let* cmd = Builder.read_cmd s in
          Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
          read ()
        in
@@ -62,43 +67,43 @@ let observe () remote id =
   match Uuidm.of_string id with
   | None -> Error (`Msg "error parsing uuid")
   | Some uuid ->
-    connect remote >>= fun s ->
-    Builder.write_cmd s (Builder.Observe uuid) >>= fun () ->
+    let* s = connect remote in
+    let* () = Builder.write_cmd s (Builder.Observe uuid) in
     let rec read () =
-      Builder.read_cmd s >>= fun cmd ->
+      let* cmd = Builder.read_cmd s in
       Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
       read ()
     in
     read ()
 
 let info_ () remote =
-  connect remote >>= fun s ->
-  Builder.write_cmd s Builder.Info >>= fun () ->
-  Builder.read_cmd s >>= fun cmd ->
+  let* s = connect remote in
+  let* () = Builder.write_cmd s Builder.Info in
+  let* cmd = Builder.read_cmd s in
   Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
   Ok ()
 
 let unschedule () remote name =
-  connect remote >>= fun s ->
+  let* s = connect remote in
   Builder.write_cmd s (Builder.Unschedule name)
 
 let execute () remote name =
-  connect remote >>= fun s ->
+  let* s = connect remote in
   Builder.write_cmd s (Builder.Execute name)
 
 let schedule () remote name script period =
-  Bos.OS.File.read (Fpath.v script) >>= fun script ->
+  let* script = Bos.OS.File.read (Fpath.v script) in
   let job = Builder.{ name ; script } in
-  connect remote >>= fun s ->
+  let* s = connect remote in
   Builder.write_cmd s (Builder.Schedule (period, job))
 
 let schedule_orb_build () remote name opam_package period =
   let job = Builder.{ name ; opam_package } in
-  connect remote >>= fun s ->
+  let* s = connect remote in
   Builder.write_cmd s (Builder.Schedule_orb_build (period, job))
 
 let reschedule () remote name next period =
-  connect remote >>= fun s ->
+  let* s = connect remote in
   Builder.write_cmd s (Builder.Reschedule (name, next, period))
 
 let help () man_format cmds = function

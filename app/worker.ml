@@ -1,4 +1,4 @@
-open Rresult.R.Infix
+let (let*) = Result.bind
 
 let sh = "script.sh"
 
@@ -28,13 +28,13 @@ let read_console_write_network s fd uuid =
 
 let prepare_fs job =
   let tmpdir = Fpath.v (tmp_dirname ()) in
-  Bos.OS.Dir.create tmpdir >>= fun did_not_exist ->
+  let* did_not_exist = Bos.OS.Dir.create tmpdir in
   if not did_not_exist then
     Error (`Msg "path already existed")
   else
-    Bos.OS.Dir.set_current tmpdir >>= fun () ->
-    Bos.OS.File.write ~mode:500 Fpath.(tmpdir / sh) job.Builder.script >>| fun () ->
-    tmpdir
+    let* () = Bos.OS.Dir.set_current tmpdir in
+    let* () = Bos.OS.File.write ~mode:500 Fpath.(tmpdir / sh) job.Builder.script in
+    Ok tmpdir
 
 let collect_output tmpdir =
   let all_files =
@@ -121,16 +121,16 @@ let jump () (host, port) =
   in
   let disc_on_err s = function Ok x -> Ok x | Error _ as e -> disconnect s; e in
   let init ~old () =
-    connect () >>= fun s ->
+    let* s = connect () in
     let hello =
       if old then
         Builder.(Client_hello cmds)
       else
         Builder.(Client_hello2 (`Worker, worker_cmds))
     in
-    disc_on_err s (Builder.write_cmd s hello) >>= fun () ->
-    disc_on_err s (Builder.read_cmd s) >>| fun cmd ->
-    s, cmd
+    let* () = disc_on_err s (Builder.write_cmd s hello) in
+    let* cmd = disc_on_err s (Builder.read_cmd s) in
+    Ok (s, cmd)
   in
   let rec establish ~old () =
     match init ~old () with
@@ -154,11 +154,12 @@ let jump () (host, port) =
       Error (`Msg "bad communication")
   in
   let rec hs () =
-    establish ~old:false () >>= fun (s, cmd) ->
-    good_server_hello s cmd >>= fun () ->
+    let* s, cmd = establish ~old:false () in
+    let* () = good_server_hello s cmd in
     match
-      disc_on_err s (Builder.write_cmd s Builder.Job_requested >>= fun () ->
-                     Builder.read_cmd s)
+      disc_on_err s (
+        let* () = Builder.write_cmd s Builder.Job_requested in
+        Builder.read_cmd s)
     with
     | Ok cmd -> Ok (s, cmd)
     | Error `Msg msg ->
@@ -172,18 +173,20 @@ let jump () (host, port) =
       Logs.err (fun m -> m "error %s while submitting result" msg);
       Error (`Msg msg)
   in
-  hs () >>= fun (s, cmd) ->
-  (match cmd with
-   | Builder.Job_schedule (uuid, job) ->
-     Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid
-                  Builder.pp_script_job job);
-     let r, data = execute_job s uuid job in
-     let fini = Builder.Job_finished (uuid, r, data) in
-     submit_success s fini
-   | cmd ->
-     Logs.err (fun m -> m "expected Job, got %a" Builder.pp_cmd cmd);
-     disconnect s;
-     Error (`Msg "bad communication")) >>= fun () ->
+  let* s, cmd = hs () in
+  let* () =
+    match cmd with
+    | Builder.Job_schedule (uuid, job) ->
+      Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid
+                   Builder.pp_script_job job);
+      let r, data = execute_job s uuid job in
+      let fini = Builder.Job_finished (uuid, r, data) in
+      submit_success s fini
+    | cmd ->
+      Logs.err (fun m -> m "expected Job, got %a" Builder.pp_cmd cmd);
+      disconnect s;
+      Error (`Msg "bad communication")
+  in
   disconnect s;
   Ok ()
 

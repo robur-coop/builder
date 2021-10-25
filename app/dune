@@ -21,8 +21,7 @@
  (name inspect)
  (public_name builder-inspect)
  (modules inspect)
- (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty bos rresult
-    duration))
+ (libraries cmdliner builder logs.fmt fmt.cli logs.cli fmt.tty bos duration))
 
 (executable
  (name test)

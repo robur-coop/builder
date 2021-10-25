@@ -1,5 +1,7 @@
 open Lwt.Infix
 
+let (let*) = Result.bind
+
 let read fd =
   Lwt.catch (fun () ->
       let rec r b ?(off = 0) l =
@@ -116,7 +118,6 @@ let schedule t =
   s_next false
 
 let dump, restore =
-  let open Rresult.R.Infix in
   let file = "state" in
   (fun t ->
      let state =
@@ -126,23 +127,23 @@ let dump, restore =
      in
      let data = Builder.Asn.state_to_cs state in
      let bak = Fpath.(t.dir / file + "tmp") in
-     Bos.OS.File.write bak (Cstruct.to_string data) >>= fun () ->
+     let* () = Bos.OS.File.write bak (Cstruct.to_string data) in
      Bos.OS.U.(error_to_msg (rename bak Fpath.(t.dir / file)))),
   (fun upload dir ->
-     Bos.OS.Dir.create dir >>= fun _ ->
+     let* _ = Bos.OS.Dir.create dir in
      let to_read = Fpath.(dir / file) in
      let queue = Queue.create ()
      and schedule = S.create ~dummy 13
      and waiter = Lwt_condition.create ()
      and he = Happy_eyeballs_lwt.create ()
      in
-     Bos.OS.File.exists to_read >>= function
-     | false ->
+     let* t_r_exists = Bos.OS.File.exists to_read in
+     if not t_r_exists then begin
        Logs.warn (fun m -> m "state file does not exist, using empty");
        Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he }
-     | true ->
-       Bos.OS.File.read to_read >>= fun data ->
-       Builder.Asn.state_of_cs (Cstruct.of_string data) >>= fun items ->
+     end else
+       let* data = Bos.OS.File.read to_read in
+       let* items = Builder.Asn.state_of_cs (Cstruct.of_string data) in
        let queue, schedule =
          List.fold_left (fun (queue, schedule) -> function
              | Builder.Job j -> Queue.add j queue; (queue, schedule)
@@ -154,10 +155,9 @@ let dump, restore =
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
 let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full) =
-  let open Rresult.R.Infix in
   let out_dir = Fpath.(dir / job.Builder.name / Uuidm.to_string uuid) in
   Logs.info (fun m -> m "saving result to %a" Fpath.pp out_dir);
-  Bos.OS.Dir.create out_dir >>= fun _ ->
+  let* _ = Bos.OS.Dir.create out_dir in
   let full_cs = Builder.Asn.exec_to_cs full in
   Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs)
 
