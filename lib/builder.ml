@@ -103,13 +103,12 @@ type cmd =
   | Client_hello2 of [ `Client | `Worker ] * int
   | Server_hello2
 
-let cmds = 14 (* not used anymore, don't update *)
 let client_cmds = 9
 let worker_cmds = 4
 
 let version =
-  Fmt.str "version %%VERSION%% protocol version %d (client %d worker %d)"
-    cmds client_cmds worker_cmds
+  Fmt.str "version %%VERSION%% protocol: client %d worker %d"
+    client_cmds worker_cmds
 
 let pp_cmd ppf = function
   | Job_requested -> Fmt.string ppf "job request"
