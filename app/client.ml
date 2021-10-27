@@ -1,6 +1,6 @@
 let (let*) = Result.bind
 
-let rec connect ?(old = false) (host, port) =
+let connect (host, port) =
   let connect_server () =
     try
       let sockaddr = Unix.ADDR_INET (host, port) in
@@ -13,21 +13,13 @@ let rec connect ?(old = false) (host, port) =
       Error (`Msg "connect failure")
   in
   let* s = connect_server () in
-  let hello =
-    if old then
-      Builder.(Client_hello cmds)
-    else
-      Builder.(Client_hello2 (`Client, client_cmds))
-  in
+  let hello = Builder.(Client_hello2 (`Client, client_cmds)) in
   let* () = Builder.write_cmd s hello in
   match Builder.read_cmd s with
-  | Ok (Builder.Server_hello _ | Builder.Server_hello2) -> Ok s
+  | Ok Builder.Server_hello2 -> Ok s
   | Ok cmd ->
     Logs.err (fun m -> m "expected Server Hello, got %a" Builder.pp_cmd cmd);
     Error (`Msg "bad communication")
-  | Error (`Msg _) when old = false ->
-    Logs.warn (fun m -> m "retrying with old = true");
-    connect ~old:true (host, port)
   | Error _ as e -> e
 
 let observe_latest () remote =

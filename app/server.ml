@@ -282,8 +282,6 @@ let handle t fd addr =
       end
   in
   read_cmd fd >>= (function
-      | Builder.Client_hello n when n = Builder.cmds ->
-        write_cmd fd Builder.(Server_hello cmds)
       | Builder.Client_hello2 (t, n) when
           (t = `Client && n = Builder.client_cmds) ||
           (t = `Worker && n = Builder.worker_cmds) ->

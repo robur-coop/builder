@@ -88,8 +88,6 @@ let pp_info ppf { schedule ; queue ; running } =
            (triple ~sep:(any ",@,") pp_script_job Uuidm.pp pp_time)) running
 
 type cmd =
-  | Client_hello of int
-  | Server_hello of int
   | Job_requested (* worker *)
   | Job_schedule of Uuidm.t * script_job (* worker *)
   | Job_finished of Uuidm.t * execution_result * data (* worker *)
@@ -114,8 +112,6 @@ let version =
     cmds client_cmds worker_cmds
 
 let pp_cmd ppf = function
-  | Client_hello max -> Fmt.pf ppf "client hello (max %d)" max
-  | Server_hello max -> Fmt.pf ppf "server hello (max %d)" max
   | Job_requested -> Fmt.string ppf "job request"
   | Job_schedule (uuid, job) ->
     Fmt.pf ppf "[%a] job schedule %a" Uuidm.pp uuid pp_script_job job
@@ -334,8 +330,8 @@ module Asn = struct
 
   let cmd =
     let f = function
-      | `C1 `C1 max -> Client_hello max
-      | `C1 `C2 max -> Server_hello max
+      | `C1 `C1 _max -> assert false
+      | `C1 `C2 _max -> assert false
       | `C1 `C3 (uuid, job) -> Job_schedule (uuid, job)
       | `C1 `C4 (uuid, res, data) -> Job_finished (uuid, res, data)
       | `C1 `C5 (uuid, out) -> Output (uuid, out)
@@ -352,8 +348,6 @@ module Asn = struct
       | `C3 `C3 (t, n) -> Client_hello2 (t, n)
       | `C3 `C4 () -> Server_hello2
     and g = function
-      | Client_hello max -> `C1 (`C1 max)
-      | Server_hello max -> `C1 (`C2 max)
       | Job_schedule (uuid, job) -> `C1 (`C3 (uuid, job))
       | Job_finished (uuid, res, data) -> `C1 (`C4 (uuid, res, data))
       | Output (uuid, out) -> `C1 (`C5 (uuid, out))
