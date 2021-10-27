@@ -417,7 +417,7 @@ end
 let rec ign_intr f v =
   try f v with Unix.Unix_error (Unix.EINTR, _, _) -> ign_intr f v
 
-let (let*) = Result.bind
+let ( let* ) = Result.bind
 
 let read fd =
   try

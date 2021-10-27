@@ -11,7 +11,7 @@ let prepare_console out started now res =
   started :: cons @ [ exited ; stopped ]
 
 let jump () file console script output =
-  let (let*) = Result.bind in
+  let ( let* ) = Result.bind in
   let* data = Bos.OS.File.read (Fpath.v file) in
   let* job, _uuid, out, started, now, res, data =
     Builder.Asn.exec_of_cs (Cstruct.of_string data)

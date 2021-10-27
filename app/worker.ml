@@ -1,4 +1,4 @@
-let (let*) = Result.bind
+let ( let* ) = Result.bind
 
 let sh = "script.sh"
 

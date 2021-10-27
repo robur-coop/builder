@@ -1,6 +1,6 @@
 open Lwt.Infix
 
-let (let*) = Result.bind
+let ( let* ) = Result.bind
 
 let read fd =
   Lwt.catch (fun () ->
