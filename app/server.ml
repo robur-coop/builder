@@ -73,7 +73,7 @@ let dummy =
 type t = {
   mutable queue : Builder.job Queue.t ;
   mutable schedule : S.t ;
-  mutable running : (Ptime.t * Builder.script_job * string Lwt_condition.t * (int64 * string) list) UM.t ;
+  mutable running : (Ptime.t * Builder.script_job * (int64 * string) Lwt_condition.t * (int64 * string) list) UM.t ;
   waiter : unit Lwt_condition.t ;
   dir : Fpath.t ;
   upload : string option ;
@@ -188,8 +188,12 @@ let job_finished state uuid res data =
     Lwt.return_unit
   | Some (started, job, cond, out) ->
     let now = Ptime_clock.now () in
+    let res_ts =
+      let delta = Ptime.diff now started in
+      Duration.of_f (Ptime.Span.to_float_s delta)
+    in
     let res_str = Fmt.to_to_string Builder.pp_execution_result res in
-    Lwt_condition.broadcast cond res_str;
+    Lwt_condition.broadcast cond (res_ts, res_str);
     let full =
       let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
       let out = List.rev out in
@@ -339,11 +343,11 @@ let handle t fd addr =
                  Logs.err (fun m -> m "unknown %a, discarding %S"
                               Uuidm.pp uuid data)
                | Some (created, job, cond, out) ->
-                 Lwt_condition.broadcast cond data;
                  let ts =
                    let delta = Ptime.diff (Ptime_clock.now ()) created in
                    Duration.of_f (Ptime.Span.to_float_s delta)
                  in
+                 Lwt_condition.broadcast cond (ts, data);
                  let value = created, job, cond, (ts, data) :: out in
                  t.running <- UM.add uuid value t.running);
               read_or_timeout ()
@@ -422,11 +426,11 @@ let handle t fd addr =
     begin match UM.find_opt id t.running with
       | Some (_, _, cond, out) ->
         let open Lwt.Infix in
-        Lwt_list.iter_s (fun (_, l) ->
+        Lwt_list.iter_s (fun (_ts, l) ->
             write_cmd fd (Builder.Output (id, l)) >|= ignore)
           (List.rev out) >>= fun () ->
         let rec more () =
-          Lwt_condition.wait cond >>= fun data ->
+          Lwt_condition.wait cond >>= fun (_ts, data) ->
           write_cmd fd (Builder.Output (id, data)) >>= function
           | Ok () -> more ()
           | Error _ -> Lwt.return (Ok ())
