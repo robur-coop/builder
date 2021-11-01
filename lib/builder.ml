@@ -385,7 +385,7 @@ module Asn = struct
                    (explicit 4 (sequence3
                                   (required ~label:"uuid" uuid)
                                   (required ~label:"output" utf8_string)
-                                  (optional ~label:"timestamp" Asn.S.int)))
+                                  (optional ~label:"timestamp" int)))
                    (explicit 5 (sequence2
                                   (required ~label:"period" period)
                                   (required ~label:"job" script_job))))
