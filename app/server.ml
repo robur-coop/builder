@@ -426,12 +426,12 @@ let handle t fd addr =
     begin match UM.find_opt id t.running with
       | Some (_, _, cond, out) ->
         let open Lwt.Infix in
-        Lwt_list.iter_s (fun (_ts, l) ->
-            write_cmd fd (Builder.Output (id, l)) >|= ignore)
+        Lwt_list.iter_s (fun (ts, l) ->
+            write_cmd fd (Builder.Output_timestamped (id, ts, l)) >|= ignore)
           (List.rev out) >>= fun () ->
         let rec more () =
-          Lwt_condition.wait cond >>= fun (_ts, data) ->
-          write_cmd fd (Builder.Output (id, data)) >>= function
+          Lwt_condition.wait cond >>= fun (ts, data) ->
+          write_cmd fd (Builder.Output_timestamped (id, ts, data)) >>= function
           | Ok () -> more ()
           | Error _ -> Lwt.return (Ok ())
         in
