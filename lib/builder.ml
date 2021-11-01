@@ -92,6 +92,7 @@ type cmd =
   | Job_schedule of Uuidm.t * script_job (* worker *)
   | Job_finished of Uuidm.t * execution_result * data (* worker *)
   | Output of Uuidm.t * string (* worker and client *)
+  | Output_timestamped of Uuidm.t * int64 * string (* client *)
   | Schedule of period * script_job (* client *)
   | Unschedule of string (* client *)
   | Info (* client *)
@@ -103,7 +104,7 @@ type cmd =
   | Client_hello2 of [ `Client | `Worker ] * int
   | Server_hello2
 
-let client_cmds = 9
+let client_cmds = 10
 let worker_cmds = 4
 
 let version =
@@ -118,6 +119,7 @@ let pp_cmd ppf = function
     Fmt.pf ppf "[%a] job finished with %a: %a" Uuidm.pp uuid
       pp_execution_result result pp_data data
   | Output (uuid, data) -> Fmt.pf ppf "[%a] %S" Uuidm.pp uuid data
+  | Output_timestamped (uuid, ts, data) -> Fmt.pf ppf "[%a] %a: %S" Uuidm.pp uuid Duration.pp ts data
   | Schedule (period, job) ->
     Fmt.pf ppf "schedule at %a: %a" pp_period period pp_script_job job
   | Unschedule job_name -> Fmt.pf ppf "unschedule %s" job_name
@@ -333,7 +335,11 @@ module Asn = struct
       | `C1 `C2 _max -> assert false
       | `C1 `C3 (uuid, job) -> Job_schedule (uuid, job)
       | `C1 `C4 (uuid, res, data) -> Job_finished (uuid, res, data)
-      | `C1 `C5 (uuid, out) -> Output (uuid, out)
+      | `C1 `C5 (uuid, out, timestamp) ->
+        begin match timestamp with
+          | None -> Output (uuid, out)
+          | Some ts -> Output_timestamped (uuid, Int64.of_int ts, out)
+        end
       | `C1 `C6 (period, job) -> Schedule (period, job)
       | `C2 `C1 () -> Info
       | `C2 `C2 (schedule, queue, running) ->
@@ -349,7 +355,8 @@ module Asn = struct
     and g = function
       | Job_schedule (uuid, job) -> `C1 (`C3 (uuid, job))
       | Job_finished (uuid, res, data) -> `C1 (`C4 (uuid, res, data))
-      | Output (uuid, out) -> `C1 (`C5 (uuid, out))
+      | Output (uuid, out) -> `C1 (`C5 (uuid, out, None))
+      | Output_timestamped (uuid, ts, out) -> `C1 (`C5 (uuid, out, Some (Int64.to_int ts)))
       | Schedule (period, job) -> `C1 (`C6 (period, job))
       | Info -> `C2 (`C1 ())
       | Info_reply { schedule ; queue ; running } ->
@@ -375,9 +382,10 @@ module Asn = struct
                                   (required ~label:"uuid" uuid)
                                   (required ~label:"result" res)
                                   (required ~label:"data" data)))
-                   (explicit 4 (sequence2
+                   (explicit 4 (sequence3
                                   (required ~label:"uuid" uuid)
-                                  (required ~label:"output" utf8_string)))
+                                  (required ~label:"output" utf8_string)
+                                  (optional ~label:"timestamp" Asn.S.int)))
                    (explicit 5 (sequence2
                                   (required ~label:"period" period)
                                   (required ~label:"job" script_job))))
