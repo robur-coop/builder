@@ -1,7 +1,6 @@
 [Unit]
 Description=Builder daemon
 After=syslog.target network.target
-Wants=builder-worker.service
 
 [Service]
 Type=simple
