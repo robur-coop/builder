@@ -286,14 +286,22 @@ let handle t fd addr =
       end
   in
   read_cmd fd >>= (function
-      | Builder.Client_hello2 (t, n) when
-          (t = `Client && n = Builder.client_cmds) ||
-          (t = `Worker && n = Builder.worker_cmds) ->
-        write_cmd fd Builder.Server_hello2
+      | Builder.Client_hello2 (`Client, n) ->
+        write_cmd fd Builder.Server_hello2 >>= fun () ->
+        begin match n with
+          | 9 -> Lwt_result.return `Client_hello_9
+          | 10 -> Lwt_result.return `Client_hello_10
+          | n ->
+            Logs.err (fun m -> m "unsupported client version %d" n);
+            Lwt_result.fail (`Msg "unsupported client version")
+        end
+      | Builder.Client_hello2 (`Worker, n) when n = Builder.worker_cmds ->
+        write_cmd fd Builder.Server_hello2 >>= fun () ->
+        Lwt_result.return `Worker_hello
       | cmd ->
         Logs.err (fun m -> m "expected client hello, got %a"
                      Builder.pp_cmd cmd);
-        Lwt_result.lift (Error (`Msg "bad communication"))) >>= fun () ->
+        Lwt_result.lift (Error (`Msg "bad communication"))) >>= fun hello ->
   read_cmd fd >>= function
   | Builder.Job_requested ->
     Logs.app (fun m -> m "job requested");
@@ -426,12 +434,17 @@ let handle t fd addr =
     begin match UM.find_opt id t.running with
       | Some (_, _, cond, out) ->
         let open Lwt.Infix in
+        let output id ts data = match hello with
+          (* We don't expect `Worker_hello... *)
+          | `Client_hello_9 | `Worker_hello -> Builder.Output (id, data)
+          | `Client_hello_10 -> Builder.Output_timestamped (id, ts, data)
+        in
         Lwt_list.iter_s (fun (ts, l) ->
-            write_cmd fd (Builder.Output_timestamped (id, ts, l)) >|= ignore)
+            write_cmd fd (output id ts l) >|= ignore)
           (List.rev out) >>= fun () ->
         let rec more () =
           Lwt_condition.wait cond >>= fun (ts, data) ->
-          write_cmd fd (Builder.Output_timestamped (id, ts, data)) >>= function
+          write_cmd fd (output id ts data) >>= function
           | Ok () -> more ()
           | Error _ -> Lwt.return (Ok ())
         in
