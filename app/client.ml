@@ -13,10 +13,10 @@ let connect (host, port) =
       Error (`Msg "connect failure")
   in
   let* s = connect_server () in
-  let hello = Builder.(Client_hello2 (`Client, client_cmds)) in
+  let hello = Builder.(Client_hello (`Client, client_version)) in
   let* () = Builder.write_cmd s hello in
   match Builder.read_cmd s with
-  | Ok Builder.Server_hello2 -> Ok s
+  | Ok Builder.Server_hello -> Ok s
   | Ok cmd ->
     Logs.err (fun m -> m "expected Server Hello, got %a" Builder.pp_cmd cmd);
     Error (`Msg "bad communication")
@@ -83,9 +83,9 @@ let execute () remote name =
   let* s = connect remote in
   Builder.write_cmd s (Builder.Execute name)
 
-let schedule () remote name script period =
+let schedule () remote name platform script period =
   let* script = Bos.OS.File.read (Fpath.v script) in
-  let job = Builder.{ name ; script } in
+  let job = Builder.{ name ; platform ; script } in
   let* s = connect remote in
   Builder.write_cmd s (Builder.Schedule (period, job))
 
@@ -97,6 +97,10 @@ let schedule_orb_build () remote name opam_package period =
 let reschedule () remote name next period =
   let* s = connect remote in
   Builder.write_cmd s (Builder.Reschedule (name, next, period))
+
+let drop_platform () remote name =
+  let* s = connect remote in
+  Builder.write_cmd s (Builder.Drop_platform name)
 
 let help () man_format cmds = function
   | None -> `Help (`Pager, None)
@@ -173,7 +177,7 @@ let next =
 
 let script =
   let doc = "The script to execute" in
-  Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"FILE")
+  Arg.(required & pos 2 (some file) None & info [ ] ~doc ~docv:"FILE")
 
 let opam_package =
   let doc = "The opam package to build" in
@@ -201,7 +205,11 @@ let unschedule_cmd =
   Term.info "unschedule"
 
 let schedule_cmd =
-  Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period)),
+  let platform =
+    let doc = "The platform to schedule the job on" in
+    Arg.(required & pos 1 (some string) None & info [] ~doc ~docv:"PLATFORM")
+  in
+  Term.(term_result (const schedule $ setup_log $ remote $ nam $ platform $ script $ period)),
   Term.info "schedule"
 
 let schedule_orb_build_cmd =
@@ -216,11 +224,19 @@ let execute_cmd =
   Term.(term_result (const execute $ setup_log $ remote $ nam)),
   Term.info "execute"
 
+let drop_platform_cmd =
+  let platform =
+    let doc = "The platform to drop" in
+    Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
+  in
+  Term.(term_result (const drop_platform $ setup_log $ remote $ platform)),
+  Term.info "drop-platform"
+
 let help_cmd =
   let doc = "Builder client" in
   Term.(ret (const help $ setup_log $ Term.man_format $ Term.choice_names $ Term.pure None)),
   Term.info "builder-client" ~version:Builder.version ~doc
 
-let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ]
+let cmds = [ help_cmd ; schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ; drop_platform_cmd ]
 
 let () = match Term.eval_choice help_cmd cmds with `Ok () -> exit 0 | _ -> exit 1

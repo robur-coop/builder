@@ -7,7 +7,7 @@ Type=simple
 User=builder
 Group=builder
 # Add --ip and --upload args as needed
-ExecStart=/usr/bin/builder-server --dir /var/lib/builder/
+ExecStart=/usr/bin/builder-server
 
 [Install]
 WantedBy=multi-user.target
