@@ -13,10 +13,10 @@ let connect (host, port) =
       Error (`Msg "connect failure")
   in
   let* s = connect_server () in
-  let hello = Builder.(Client_hello2 (`Client, client_cmds)) in
+  let hello = Builder.(Client_hello (`Client, client_version)) in
   let* () = Builder.write_cmd s hello in
   match Builder.read_cmd s with
-  | Ok Builder.Server_hello2 -> Ok s
+  | Ok Builder.Server_hello -> Ok s
   | Ok cmd ->
     Logs.err (fun m -> m "expected Server Hello, got %a" Builder.pp_cmd cmd);
     Error (`Msg "bad communication")
@@ -83,9 +83,9 @@ let execute () remote name =
   let* s = connect remote in
   Builder.write_cmd s (Builder.Execute name)
 
-let schedule () remote name script period =
+let schedule () remote name platform script period =
   let* script = Bos.OS.File.read (Fpath.v script) in
-  let job = Builder.{ name ; script } in
+  let job = Builder.{ name ; platform ; script } in
   let* s = connect remote in
   Builder.write_cmd s (Builder.Schedule (period, job))
 
@@ -173,7 +173,7 @@ let next =
 
 let script =
   let doc = "The script to execute" in
-  Arg.(required & pos 1 (some file) None & info [ ] ~doc ~docv:"FILE")
+  Arg.(required & pos 2 (some file) None & info [ ] ~doc ~docv:"FILE")
 
 let opam_package =
   let doc = "The opam package to build" in
@@ -200,8 +200,12 @@ let unschedule_cmd =
   Term.(term_result (const unschedule $ setup_log $ remote $ nam)),
   Term.info "unschedule"
 
+let platform =
+  let doc = "The platform to schedule the job on" in
+  Arg.(required & pos 1 (some string) None & info [] ~doc ~docv:"PLATFORM")
+
 let schedule_cmd =
-  Term.(term_result (const schedule $ setup_log $ remote $ nam $ script $ period)),
+  Term.(term_result (const schedule $ setup_log $ remote $ nam $ platform $ script $ period)),
   Term.info "schedule"
 
 let schedule_orb_build_cmd =

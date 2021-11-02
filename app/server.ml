@@ -67,11 +67,13 @@ module S = Binary_heap.Make (struct
   end)
 
 let dummy =
-  let job = Builder.(Script_job { name = "dummy" ; script = "#nothing" }) in
+  let job = Builder.(Script_job { name = "dummy" ; platform = "dummy-platform" ; script = "#nothing" }) in
   Builder.{ next = Ptime.epoch ; period = Daily ; job }
 
+module SM = Map.Make(String)
+
 type t = {
-  mutable queue : Builder.job Queue.t ;
+  mutable queues : Builder.job Queue.t SM.t ;
   mutable schedule : S.t ;
   mutable running : (Ptime.t * Builder.script_job * (int64 * string) Lwt_condition.t * (int64 * string) list) UM.t ;
   waiter : unit Lwt_condition.t ;
@@ -79,6 +81,20 @@ type t = {
   upload : string option ;
   he : Happy_eyeballs_lwt.t ;
 }
+
+let find_queue t p =
+  match SM.find_opt p t.queues with
+  | Some q -> q
+  | None ->
+    let q = Queue.create () in
+    S.iter (fun { job ; _ } ->
+      match job with
+      | Builder.Script_job { platform  ; _ } ->
+        if String.equal platform p then Queue.add job q
+      | Builder.Orb_build_job _ -> Queue.add job q)
+      t.schedule;
+    t.queues <- SM.add p q t.queues;
+    q
 
 let p_to_span p =
   let one_hour = 60 * 60 in
@@ -89,17 +105,32 @@ let p_to_span p =
   in
   Ptime.Span.of_int_s s
 
-let add_to_queue t job =
-  if Queue.fold (fun acc i ->
-      if acc then not (Builder.job_equal i job) else acc)
-      true t.queue
-  then begin
-    Queue.add job t.queue;
-    Lwt_condition.broadcast t.waiter ();
-  end
+let add_to_queue t platform job =
+  match SM.find_opt platform t.queues with
+  | Some q ->
+    if Queue.fold (fun acc i ->
+        if acc then not (Builder.job_equal i job) else acc)
+        true q
+    then Queue.add job q;
+    Lwt_condition.broadcast t.waiter ()
+  | None -> ()
+
+let add_to_queues t = function
+  | Builder.Orb_build_job _ as job ->
+    SM.iter (fun _ q ->
+      if Queue.fold (fun acc i ->
+          if acc then not (Builder.job_equal i job) else acc)
+          true q
+      then Queue.add job q)
+    t.queues;
+    Lwt_condition.broadcast t.waiter ()
+  | Builder.Script_job { platform ; _ } as job ->
+    let q = find_queue t platform in
+    Queue.add job q;
+    Lwt_condition.broadcast t.waiter ()
 
 let schedule_job t now period job =
-  add_to_queue t job;
+  add_to_queues t job;
   match Ptime.add_span now (p_to_span period) with
   | None -> Logs.err (fun m -> m "ptime add span failed when scheduling job")
   | Some next -> S.add t.schedule Builder.{ next ; period ; job }
@@ -121,9 +152,12 @@ let dump, restore =
   let file = "state" in
   (fun t ->
      let state =
-       let jobs = Queue.fold (fun acc j -> Builder.Job j :: acc) [] t.queue in
-       S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule
-         (List.rev jobs)
+       let queues =
+         SM.fold (fun platform q acc ->
+           Builder.Queue (platform, Queue.to_seq q |> List.of_seq) :: acc)
+           t.queues []
+       in
+       S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule queues
      in
      let data = Builder.Asn.state_to_cs state in
      let bak = Fpath.(t.dir / file + "tmp") in
@@ -132,7 +166,7 @@ let dump, restore =
   (fun upload dir ->
      let* _ = Bos.OS.Dir.create dir in
      let to_read = Fpath.(dir / file) in
-     let queue = Queue.create ()
+     let queues = SM.empty
      and schedule = S.create ~dummy 13
      and waiter = Lwt_condition.create ()
      and he = Happy_eyeballs_lwt.create ()
@@ -140,17 +174,21 @@ let dump, restore =
      let* t_r_exists = Bos.OS.File.exists to_read in
      if not t_r_exists then begin
        Logs.warn (fun m -> m "state file does not exist, using empty");
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he }
+       Ok { queues ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he }
      end else
        let* data = Bos.OS.File.read to_read in
        let* items = Builder.Asn.state_of_cs (Cstruct.of_string data) in
-       let queue, schedule =
-         List.fold_left (fun (queue, schedule) -> function
-             | Builder.Job j -> Queue.add j queue; (queue, schedule)
-             | Builder.Schedule s -> S.add schedule s; (queue, schedule))
-           (queue, schedule) items
+       let queues, schedule =
+         List.fold_left (fun (queues, schedule) -> function
+             | Builder.Queue (platform, jobs) ->
+               let q = List.to_seq jobs |> Queue.of_seq in
+               (SM.add platform q queues, schedule)
+             | Builder.Schedule s ->
+               S.add schedule s;
+               (queues, schedule))
+           (queues, schedule) items
        in
-       Ok { queue ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he })
+       Ok { queues ; schedule ; running = UM.empty ; waiter ; dir ; upload ; he })
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
@@ -207,26 +245,31 @@ let job_finished state uuid res data =
       Logs.err (fun m -> m "error saving %s (%a) to disk: %s"
                    job.Builder.name Uuidm.pp uuid msg)
 
-let read_template () =
+let read_template platform =
   match
-    Bos.OS.File.read (Fpath.v "/etc/builder/orb-build.template"),
-    Bos.OS.File.read (Fpath.v "/usr/local/etc/builder/orb-build.template")
+    Bos.OS.File.read Fpath.(v "/etc/builder/orb-build.template" + platform),
+    Bos.OS.File.read Fpath.(v "/usr/local/etc/builder/orb-build.template" + platform)
   with
   | Ok data, _ -> Ok data
   | _, Ok data -> Ok data
   | Error _ as e, _ ->
-    Logs.err (fun m -> m "couldn't read template in /etc/builder or /usr/local/etc/builder");
+    Logs.err (fun m -> m "couldn't read template for %S in /etc/builder or /usr/local/etc/builder" platform);
     e
 
-let job_to_script_job = function
-  | Builder.Script_job j -> Ok j
+let job_to_script_job platform = function
+  | Builder.Script_job j ->
+    if j.Builder.platform = platform then
+      Ok j
+    else
+      Error (`Msg (Fmt.str "script platform %S does not match worker platform %S"
+                     j.Builder.platform platform))
   | Builder.Orb_build_job { name ; opam_package } ->
-    match read_template () with
+    match read_template platform with
     | Ok template ->
       let script =
         Astring.String.(concat ~sep:opam_package (cuts ~sep:"%%OPAM_PACKAGE%%" template))
       in
-      Ok { name ; script }
+      Ok { name ; platform ; script }
     | Error _ as e -> e
 
 let reschedule_job t name f =
@@ -286,27 +329,22 @@ let handle t fd addr =
       end
   in
   read_cmd fd >>= (function
-      | Builder.Client_hello2 (`Client, n) ->
-        write_cmd fd Builder.Server_hello2 >>= fun () ->
-        begin match n with
-          | 9 -> Lwt_result.return `Client_hello_9
-          | 10 -> Lwt_result.return `Client_hello_10
-          | n ->
-            Logs.err (fun m -> m "unsupported client version %d" n);
-            Lwt_result.fail (`Msg "unsupported client version")
-        end
-      | Builder.Client_hello2 (`Worker, n) when n = Builder.worker_cmds ->
-        write_cmd fd Builder.Server_hello2 >>= fun () ->
+      | Builder.Client_hello (`Client, n) when n = Builder.client_version->
+        write_cmd fd Builder.Server_hello >>= fun () ->
+        Lwt_result.return `Client_hello
+      | Builder.Client_hello (`Worker, n) when n = Builder.worker_version ->
+        write_cmd fd Builder.Server_hello >>= fun () ->
         Lwt_result.return `Worker_hello
       | cmd ->
         Logs.err (fun m -> m "expected client hello, got %a"
                      Builder.pp_cmd cmd);
         Lwt_result.lift (Error (`Msg "bad communication"))) >>= fun hello ->
   read_cmd fd >>= function
-  | Builder.Job_requested ->
-    Logs.app (fun m -> m "job requested");
+  | Builder.Job_requested platform ->
+    Logs.app (fun m -> m "job requested for %S" platform);
     let rec find_job () =
-      match Queue.take_opt t.queue with
+      let queue = find_queue t platform in
+      match Queue.take_opt queue with
       | None -> Lwt.bind (Lwt_condition.wait t.waiter) find_job
       | Some job -> Lwt.return job
     in
@@ -318,13 +356,13 @@ let handle t fd addr =
                Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
                              err Builder.pp_job job pp_sockaddr addr);
                t.running <- UM.remove uuid t.running;
-               add_to_queue t job;
+               add_to_queue t platform job;
                ignore (dump t);
                Lwt.return (`Msg err))
         in
         ignore (dump t);
         let uuid = uuid_gen () in
-        Lwt_result.lift (job_to_script_job job) >>= fun script_job ->
+        Lwt_result.lift (job_to_script_job platform job) >>= fun script_job ->
         put_back_on_err uuid (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= fun () ->
         Logs.app (fun m -> m "job %a scheduled %a for %a"
                      Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
@@ -338,7 +376,7 @@ let handle t fd addr =
             Lwt_unix.sleep timeout >>= fun () ->
             Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
             job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
-            add_to_queue t job;
+            add_to_queue t platform job;
             ignore (dump t);
             Ok ()
           in
@@ -388,18 +426,20 @@ let handle t fd addr =
             S.add s si
           else ()) t.schedule;
       s
-    and queue =
-      let q = Queue.create () in
-      Queue.iter (fun job ->
-          if not (String.equal (Builder.job_name job) name) then
-            Queue.add job q
-          else
-            ())
-        t.queue;
-      q
+    and queues =
+      SM.map (fun queue ->
+        let q = Queue.create () in
+        Queue.iter (fun job ->
+            if not (String.equal (Builder.job_name job) name) then
+              Queue.add job q
+            else
+              ())
+          queue;
+        q)
+      t.queues
     in
     t.schedule <- schedule;
-    t.queue <- queue;
+    t.queues <- queues;
     ignore (dump t);
     Lwt.return (Ok ())
   | Builder.Execute name ->
@@ -420,13 +460,15 @@ let handle t fd addr =
     Logs.app (fun m -> m "info");
     let reply =
       let schedule = S.fold (fun s acc -> s :: acc) t.schedule []
-      and queue = List.rev (Queue.fold (fun acc j -> j :: acc) [] t.queue)
+      and queues = SM.fold (fun platform q acc ->
+        (platform, List.rev (Queue.fold (fun acc j -> j :: acc) [] q)) :: acc)
+        t.queues []
       and running =
         UM.fold (fun uuid (started, job, _, _) acc ->
             (started, uuid, job) :: acc)
           t.running []
       in
-      Builder.{ schedule ; queue ; running }
+      Builder.{ schedule ; queues ; running }
     in
     write_cmd fd (Builder.Info_reply reply)
   | Builder.Observe id ->
@@ -436,8 +478,8 @@ let handle t fd addr =
         let open Lwt.Infix in
         let output id ts data = match hello with
           (* We don't expect `Worker_hello... *)
-          | `Client_hello_9 | `Worker_hello -> Builder.Output (id, data)
-          | `Client_hello_10 -> Builder.Output_timestamped (id, ts, data)
+          | `Worker_hello -> Builder.Output (id, data)
+          | `Client_hello -> Builder.Output_timestamped (id, ts, data)
         in
         Lwt_list.iter_s (fun (ts, l) ->
             write_cmd fd (output id ts l) >|= ignore)

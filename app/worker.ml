@@ -91,7 +91,7 @@ let execute_job s uuid job =
       ignore (Bos.OS.Dir.delete ~recurse:true tmpdir);
       res
 
-let jump () (host, port) =
+let jump () platform (host, port) =
   (* client semantics:
      - 1 connect to server
      - 2 send client hello
@@ -122,7 +122,7 @@ let jump () (host, port) =
   let disc_on_err s = function Ok x -> Ok x | Error _ as e -> disconnect s; e in
   let init () =
     let* s = connect () in
-    let hello = Builder.(Client_hello2 (`Worker, worker_cmds)) in
+    let hello = Builder.(Client_hello (`Worker, worker_version)) in
     let* () = disc_on_err s (Builder.write_cmd s hello) in
     let* cmd = disc_on_err s (Builder.read_cmd s) in
     Ok (s, cmd)
@@ -136,7 +136,7 @@ let jump () (host, port) =
     | Ok cmd -> Ok cmd
   in
   let good_server_hello s = function
-    | Builder.Server_hello2 -> Ok ()
+    | Builder.Server_hello -> Ok ()
     | cmd ->
       Logs.err (fun m -> m "expected Server Hello with matching version, got %a"
                    Builder.pp_cmd cmd);
@@ -148,7 +148,7 @@ let jump () (host, port) =
     let* () = good_server_hello s cmd in
     match
       disc_on_err s (
-        let* () = Builder.write_cmd s Builder.Job_requested in
+        let* () = Builder.write_cmd s (Builder.Job_requested platform) in
         Builder.read_cmd s)
     with
     | Ok cmd -> Ok (s, cmd)
@@ -206,13 +206,17 @@ let remote =
   Arg.(value & opt host_port (Unix.inet_addr_loopback, 1234) &
        info [ "r" ; "remote" ] ~doc ~docv:"IP:PORT")
 
+let platform =
+  let doc = "The platform this worker is executed on" in
+  Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
+
 let setup_log =
   Term.(const setup_log
         $ Fmt_cli.style_renderer ()
         $ Logs_cli.level ())
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ remote)),
+  Term.(term_result (const jump $ setup_log $ platform $ remote)),
   Term.info "builder-worker" ~version:Builder.version
 
 let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
