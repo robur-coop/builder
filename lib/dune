@@ -1,4 +1,4 @@
 (library
  (name builder)
  (public_name builder)
- (libraries unix fpath fmt logs cstruct asn1-combinators uuidm))
+ (libraries unix fpath fmt logs cstruct asn1-combinators uuidm duration))
