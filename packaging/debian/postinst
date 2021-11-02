@@ -1,0 +1,6 @@
+#!/bin/sh
+BUILDER_USER=builder
+
+groupadd -g 497 $BUILDER_USER
+useradd -g 497 -u 497 -d /nonexistent -s /usr/sbin/nologin $BUILDER_USER
+sudo mkdir -m 0700 -p /var/lib/builder
