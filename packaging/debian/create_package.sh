@@ -27,17 +27,17 @@ install $bdir/builder-worker $bindir/builder-worker
 install $bdir/builder-inspect $bindir/builder-inspect
 
 # install service scripts
-install $basedir/Linux/builder.service $systemddir/builder.service
-install $basedir/Linux/builder-worker.service $systemddir/builder-worker.service
+install -m 0644 $basedir/Linux/builder.service $systemddir/builder.service
+install -m 0644 $basedir/Linux/builder-worker.service $systemddir/builder-worker.service
 
 # install templates
-install $basedir/packaging/debian/orb-build.template $confdir/orb-build.template
+install -m 0644 $basedir/packaging/debian/orb-build.template $confdir/orb-build.template
 
 # install debian metadata
-install $basedir/packaging/debian/control $debiandir/control
-install $basedir/packaging/debian/changelog $debiandir/changelog
-install $basedir/packaging/debian/copyright $debiandir/copyright
-install $basedir/packaging/debian/conffiles $debiandir/conffiles
+install -m 0644 $basedir/packaging/debian/control $debiandir/control
+install -m 0644 $basedir/packaging/debian/changelog $debiandir/changelog
+install -m 0644 $basedir/packaging/debian/copyright $debiandir/copyright
+install -m 0644 $basedir/packaging/debian/conffiles $debiandir/conffiles
 install $basedir/packaging/debian/postinst $debiandir/postinst
 
 dpkg-deb --build $rootdir $basedir/builder.deb
