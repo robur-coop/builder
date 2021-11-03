@@ -1,1 +1,2 @@
-/etc/builder/orb-build.template
+/etc/builder/orb-build.template.ubuntu-20.04
+/etc/builder/orb-build.template.freebsd
