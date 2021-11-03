@@ -31,7 +31,8 @@ install -m 0644 $basedir/Linux/builder.service $systemddir/builder.service
 install -m 0644 $basedir/Linux/builder-worker.service $systemddir/builder-worker.service
 
 # install templates
-install -m 0644 $basedir/packaging/debian/orb-build.template $confdir/orb-build.template
+install -m 0644 $basedir/packaging/orb-build.template.ubuntu-20.04 $confdir/orb-build.template.ubuntu-20.04
+install -m 0644 $basedir/packaging/orb-build.template.freebsd $confdir/orb-build.template.freebsd
 
 # install debian metadata
 install -m 0644 $basedir/packaging/debian/control $debiandir/control

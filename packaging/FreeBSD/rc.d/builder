@@ -20,7 +20,7 @@
 
 name=builder
 rcvar=${name}_enable
-desc="Builder web service"
+desc="Builder service"
 load_rc_config $name
 start_cmd="builder_start"
 

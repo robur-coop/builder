@@ -27,7 +27,8 @@ mkdir -p "$sbindir" "$libexecdir" "$rcdir" "$confdir"
 install -U $pdir/rc.d/builder $rcdir/builder
 
 # stage templates
-install -U $pdir/orb-build.template $confdir/orb-build.template
+install -U $pdir/../orb-build.template.freebsd $confdir/orb-build.template.freebsd
+install -U $pdir/../orb-build.template.ubuntu-20.04 $confdir/orb-build.template.ubuntu-20.04
 
 # stage app binaries
 install -U $bdir/builder-server $libexecdir/builder-server
