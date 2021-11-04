@@ -11,28 +11,23 @@ let connect (host, port) =
       with e -> Unix.close s ; raise e
     with
     | Unix.Unix_error (err, f, _) ->
-      Logs.err (fun m -> m "unix error in %s: %s" f (Unix.error_message err));
-      Error (`Msg "connect failure")
+      Error (`Msg (Fmt.str "connect unix error in %s: %s" f (Unix.error_message err)))
   in
   let* () = Builder.(write_cmd s (Client_hello (`Client, client_version))) in
   match Builder.read_cmd s with
   | Ok Builder.Server_hello -> Ok s
   | Ok cmd ->
-    Logs.err (fun m -> m "expected Server Hello, got %a" Builder.pp_cmd cmd);
-    Error (`Msg "bad communication")
+    Error (`Msg (Fmt.str "expected Server Hello, got %a" Builder.pp_cmd cmd))
   | Error _ as e -> e
 
 let teardown s =
   let r = match Builder.read_cmd s with
     | Ok Success -> Ok ()
     | Ok Failure msg ->
-      Logs.err (fun m -> m "failure %s" msg);
       Error (`Msg msg)
     | Ok cmd ->
-      Logs.err (fun m -> m "expected success or failure, received %a" Builder.pp_cmd cmd);
-      Error (`Msg "bad command")
+      Error (`Msg (Fmt.str "expected success or failure, received %a" Builder.pp_cmd cmd))
     | Error `Msg msg ->
-      Logs.err (fun m -> m "communication error %s" msg);
       Error (`Msg msg)
   in
   Unix.close s;
