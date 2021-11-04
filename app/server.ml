@@ -72,7 +72,7 @@ let dummy =
 
 module SM = Map.Make(String)
 
-type output_data = [ `Data of int64 * string | `End ]
+type output_data = [ `Data of int64 * string | `End of int64 * string ]
 
 type t = {
   mutable queues : Builder.job Queue.t SM.t ;
@@ -265,8 +265,7 @@ let job_finished state uuid res data =
       Duration.of_f (Ptime.Span.to_float_s delta)
     in
     let res_str = Fmt.to_to_string Builder.pp_execution_result res in
-    Lwt_condition.broadcast cond (`Data (res_ts, res_str));
-    Lwt_condition.broadcast cond `End;
+    Lwt_condition.broadcast cond (`End (res_ts, res_str));
     let full =
       let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
       let out = List.rev out in
@@ -506,7 +505,8 @@ let client_loop t fd =
           (List.rev out) >>= fun () ->
         let rec more () =
           Lwt_condition.wait cond >>= function
-          | `End -> Lwt.return (Ok ())
+          | `End (ts, data) ->
+            write_cmd fd (output id ts data)
           | `Data (ts, data) ->
             write_cmd fd (output id ts data) >>= function
             | Ok () -> more ()
