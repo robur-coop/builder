@@ -43,7 +43,8 @@ let observe_uuid uuid remote =
       Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
       read ()
     | _ ->
-      Logs.warn (fun m -> m "expected output, got %a" Builder.pp_cmd cmd);
+      if cmd <> Builder.Success then
+        Logs.warn (fun m -> m "expected output, got %a" Builder.pp_cmd cmd);
       Unix.close s;
       Ok ()
   in
