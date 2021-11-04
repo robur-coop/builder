@@ -126,22 +126,44 @@ let add_to_queue t platform job =
     Lwt_condition.broadcast t.waiter ()
   | None -> ()
 
-let add_to_queues t = function
+let move_to_front q q' j =
+  Queue.add j q';
+  Queue.iter
+    (fun job -> if not (Builder.job_equal j job) then Queue.add job q')
+    q
+
+let add_to_front_of_queues t = function
   | Builder.Orb_build_job _ as job ->
-    SM.iter (fun _ q ->
-      if Queue.fold (fun acc i ->
-          if acc then not (Builder.job_equal i job) else acc)
-          true q
-      then Queue.add job q)
-    t.queues;
+    let queues = SM.map (fun q ->
+      let q' = Queue.create () in
+      move_to_front q q' job;
+      q')
+      t.queues
+    in
+    t.queues <- queues;
     Lwt_condition.broadcast t.waiter ()
   | Builder.Script_job { platform ; _ } as job ->
     let q = find_queue t platform in
-    Queue.add job q;
+    let q' = Queue.create () in
+    move_to_front q q' job;
+    t.queues <- SM.add platform q' t.queues;
+    Lwt_condition.broadcast t.waiter ()
+
+let queue_contains j =
+  Queue.fold (fun acc job -> acc || Builder.job_equal j job) false
+
+let add_to_queues t = function
+  | Builder.Orb_build_job _ as job ->
+    SM.iter (fun _ q ->
+      if not (queue_contains job q) then Queue.add job q)
+      t.queues;
+    Lwt_condition.broadcast t.waiter ()
+  | Builder.Script_job { platform ; _ } as job ->
+    let q = find_queue t platform in
+    if not (queue_contains job q) then Queue.add job q;
     Lwt_condition.broadcast t.waiter ()
 
 let schedule_job t now period job =
-  add_to_queues t job;
   match Ptime.add_span now (p_to_span period) with
   | None -> Logs.err (fun m -> m "ptime add span failed when scheduling job")
   | Some next -> S.add t.schedule Builder.{ next ; period ; job }
@@ -154,6 +176,7 @@ let schedule t =
     | Builder.{ next ; period ; job } when Ptime.is_later ~than:next now ->
       S.remove t.schedule;
       schedule_job t now period job;
+      add_to_queues t job;
       s_next true
     | _ -> modified
   in
@@ -290,12 +313,11 @@ let reschedule_job t name f =
       t.schedule None
   with
   | None -> Error (`Msg ("couldn't find job " ^ name))
-  | Some (job, period, next) ->
+  | Some (job, period, _next) ->
     t.schedule <- s;
-    let job, period, next = f job period next in
+    let period, next = f period in
     schedule_job t next period job;
-    ignore (dump t);
-    Ok ()
+    Ok job
 
 let worker_loop t addr fd =
   read_cmd fd >>= function
@@ -395,6 +417,7 @@ let maybe_schedule_job t p j =
     then
       let now = Ptime_clock.now () in
       schedule_job t now p j;
+      add_to_queues t j;
       ignore (dump t);
       Lwt.return (Ok ())
     else
@@ -444,14 +467,19 @@ let client_loop t fd =
       Lwt.return (Error (`Msg ("unknown job " ^ name)))
   | Builder.Execute name ->
     Logs.app (fun m -> m "execute %s" name);
-    Lwt.return
-      (reschedule_job t name (fun job period _next ->
-        (job, period, (Ptime_clock.now ()))))
+    begin match reschedule_job t name (fun period -> period, Ptime_clock.now ()) with
+      | Ok j -> add_to_front_of_queues t j; ignore (dump t); Lwt.return (Ok ())
+      | Error e -> Lwt.return (Error e)
+    end
   | Builder.Reschedule (name, next, period) ->
     Logs.app (fun m -> m "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next);
-    Lwt.return
-      (reschedule_job t name (fun job orig_period _orig_next ->
-        (job, Option.value ~default:orig_period period, next)))
+    begin match
+        reschedule_job t name (fun orig_period ->
+          Option.value ~default:orig_period period, next)
+      with
+      | Ok j -> add_to_queues t j; ignore (dump t); Lwt.return (Ok ())
+      | Error e -> Lwt.return (Error e)
+    end
   | Builder.Info ->
     Logs.app (fun m -> m "info");
     let reply =
