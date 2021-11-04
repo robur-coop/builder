@@ -101,84 +101,42 @@ let jump () platform (host, port) =
      - 6 dump files, execute job (pipe + fork to send output to server)
      - 7 send job result to server
 
-     if while in 1-5 server communication fails, start from 1
-     if in 6 server communication fails, drop data (for now) [and retry]
-     if in 7 server communication fails, retry until publishing result is done
+     if server communication fails, exit
   *)
-  let connect () =
+  let* s =
     try
       let sockaddr = Unix.ADDR_INET (host, port) in
       let s = Unix.(socket PF_INET SOCK_STREAM 0) in
-      Unix.(connect s sockaddr);
-      Ok s
+      try
+        Unix.(connect s sockaddr);
+        Ok s
+      with e -> Unix.close s; raise e
     with
     | Unix.Unix_error (err, f, _) ->
       Logs.err (fun m -> m "unix error in %s: %s" f (Unix.error_message err));
       Error (`Msg "connect failure")
-  and disconnect s =
-    Unix.close s
-  and timeout () = Unix.sleepf 2.
   in
-  let disc_on_err s = function Ok x -> Ok x | Error _ as e -> disconnect s; e in
-  let init () =
-    let* s = connect () in
-    let hello = Builder.(Client_hello (`Worker, worker_version)) in
-    let* () = disc_on_err s (Builder.write_cmd s hello) in
-    let* cmd = disc_on_err s (Builder.read_cmd s) in
-    Ok (s, cmd)
-  in
-  let rec establish () =
-    match init () with
-    | Error `Msg e ->
-      Logs.warn (fun m -> m "error %s connecting, trying again in a bit" e);
-      timeout ();
-      establish ()
-    | Ok cmd -> Ok cmd
-  in
-  let good_server_hello s = function
-    | Builder.Server_hello -> Ok ()
-    | cmd ->
-      Logs.err (fun m -> m "expected Server Hello with matching version, got %a"
-                   Builder.pp_cmd cmd);
-      disconnect s;
-      Error (`Msg "bad communication")
-  in
-  let rec hs () =
-    let* s, cmd = establish () in
-    let* () = good_server_hello s cmd in
-    match
-      disc_on_err s (
-        let* () = Builder.write_cmd s (Builder.Job_requested platform) in
-        Builder.read_cmd s)
-    with
-    | Ok cmd -> Ok (s, cmd)
-    | Error `Msg msg ->
-      Logs.warn (fun m -> m "received error %s while waiting for job, retry" msg);
-      hs ()
-  in
-  let submit_success s fini =
-    match Builder.write_cmd s fini with
-    | Ok () -> Ok ()
-    | Error `Msg msg ->
-      Logs.err (fun m -> m "error %s while submitting result" msg);
-      Error (`Msg msg)
-  in
-  let* s, cmd = hs () in
-  let* () =
+  let r =
+    let* () = Builder.(write_cmd s (Client_hello (`Worker, worker_version))) in 
+    Logs.debug (fun m -> m "waiting for server hello");
+    let* cmd = Builder.read_cmd s in
+    let* () = if cmd = Builder.Server_hello then Ok () else Error (`Msg "bad command (expected server hello") in
+    let* () = Builder.write_cmd s (Builder.Job_requested platform) in
+    Logs.debug (fun m -> m "waiting for job");
+    let* cmd = Builder.read_cmd s in
     match cmd with
     | Builder.Job_schedule (uuid, job) ->
-      Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid
-                   Builder.pp_script_job job);
+      Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid Builder.pp_script_job job);
       let r, data = execute_job s uuid job in
-      let fini = Builder.Job_finished (uuid, r, data) in
-      submit_success s fini
+      Logs.debug (fun m -> m "executed job");
+      Builder.(write_cmd s (Job_finished (uuid, r, data)))
     | cmd ->
       Logs.err (fun m -> m "expected Job, got %a" Builder.pp_cmd cmd);
-      disconnect s;
       Error (`Msg "bad communication")
   in
-  disconnect s;
-  Ok ()
+  Unix.close s;
+  Result.iter_error (function `Msg msg -> Logs.err (fun m -> m "error %s" msg)) r;
+  r
 
 let setup_log style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer ();
