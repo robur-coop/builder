@@ -72,10 +72,12 @@ let dummy =
 
 module SM = Map.Make(String)
 
+type output_data = [ `Data of int64 * string | `End ]
+
 type t = {
   mutable queues : Builder.job Queue.t SM.t ;
   mutable schedule : S.t ;
-  mutable running : (Ptime.t * Builder.script_job * (int64 * string) Lwt_condition.t * (int64 * string) list) UM.t ;
+  mutable running : (Ptime.t * Builder.script_job * output_data Lwt_condition.t * (int64 * string) list) UM.t ;
   waiter : unit Lwt_condition.t ;
   dbdir : Fpath.t ;
   upload : string option ;
@@ -240,7 +242,8 @@ let job_finished state uuid res data =
       Duration.of_f (Ptime.Span.to_float_s delta)
     in
     let res_str = Fmt.to_to_string Builder.pp_execution_result res in
-    Lwt_condition.broadcast cond (res_ts, res_str);
+    Lwt_condition.broadcast cond (`Data (res_ts, res_str));
+    Lwt_condition.broadcast cond `End;
     let full =
       let out = List.rev_map (fun (d, d') -> Int64.to_int d, d') out in
       let out = List.rev out in
@@ -286,178 +289,169 @@ let reschedule_job t name f =
       | _, false -> S.add s si; j)
       t.schedule None
   with
-  | None ->
-    Logs.err (fun m -> m "couldn't find job %s" name);
+  | None -> Error (`Msg ("couldn't find job " ^ name))
   | Some (job, period, next) ->
     t.schedule <- s;
     let job, period, next = f job period next in
     schedule_job t next period job;
     ignore (dump t);
-    Logs.app (fun m -> m "queued job %s" name)
+    Ok ()
 
-let handle t fd addr =
-  (* -- client connection:
-     (1) read client hello (or client hello 2)
-     (2) send server hello
-     -- now there are different paths:
-     (3) read request job
-     (4) send job
-     (5) await job done
-     -- or scheduling a job
-     (3) read schedule
-     -- or unscheduling a job
-     (3) read unschedule
-     -- or info
-     (3) read info
-     (4) send info_reply
-     -- or observing
-     (3) read observe
-     (4) send outputs and job done
-  *)
-  let open Lwt_result.Infix in
-  Logs.app (fun m -> m "client connection from %a" pp_sockaddr addr);
-  let maybe_schedule_job p j =
-    if S.fold (fun { Builder.job ; _ } acc ->
-      if acc then not (Builder.job_equal job j) else acc)
-        t.schedule true
-      then
-        let now = Ptime_clock.now () in
-        schedule_job t now p j;
-        ignore (dump t);
-        Lwt.return (Ok ())
-      else begin
-        Logs.err (fun m -> m "job with same name already in schedule");
-        Lwt.return (Error (`Msg "job name already used"))
-      end
-  in
-  read_cmd fd >>= (function
-      | Builder.Client_hello (`Client, n) when n = Builder.client_version->
-        write_cmd fd Builder.Server_hello >>= fun () ->
-        Lwt_result.return `Client_hello
-      | Builder.Client_hello (`Worker, n) when n = Builder.worker_version ->
-        write_cmd fd Builder.Server_hello >>= fun () ->
-        Lwt_result.return `Worker_hello
-      | cmd ->
-        Logs.err (fun m -> m "expected client hello, got %a"
-                     Builder.pp_cmd cmd);
-        Lwt_result.lift (Error (`Msg "bad communication"))) >>= fun hello ->
+let worker_loop t addr fd =
   read_cmd fd >>= function
-  | Builder.Job_requested platform ->
-    Logs.app (fun m -> m "job requested for %S" platform);
-    let rec find_job () =
-      let queue = find_queue t platform in
-      match Queue.take_opt queue with
-      | None -> Lwt.bind (Lwt_condition.wait t.waiter) find_job
-      | Some job -> Lwt.return job
-    in
-    Lwt.bind (find_job ()) (fun job ->
-        let put_back_on_err uuid f =
-          Lwt_result.bind_lwt_err
-            f
-            (fun (`Msg err) ->
-               Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
-                             err Builder.pp_job job pp_sockaddr addr);
-               t.running <- UM.remove uuid t.running;
-               add_to_queue t platform job;
-               ignore (dump t);
-               Lwt.return (`Msg err))
-        in
-        ignore (dump t);
-        let uuid = uuid_gen () in
-        Lwt_result.lift (job_to_script_job t.cfgdir platform job) >>= fun script_job ->
-        put_back_on_err uuid (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= fun () ->
-        Logs.app (fun m -> m "job %a scheduled %a for %a"
+  | Ok Builder.Job_requested platform ->
+    begin
+      Logs.app (fun m -> m "job requested for %S" platform);
+      let rec find_job () =
+        let queue = find_queue t platform in
+        match Queue.take_opt queue with
+        | None -> Lwt_condition.wait t.waiter >>= find_job
+        | Some job -> Lwt.return job
+      in
+      find_job () >>= fun job ->
+      ignore (dump t);
+      let uuid = uuid_gen () in
+      let put_back_on_err f =
+        f >|= function
+        | Ok a -> Ok a
+        | Error `Msg err ->
+          Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
+                        err Builder.pp_job job pp_sockaddr addr);
+          t.running <- UM.remove uuid t.running;
+          add_to_queue t platform job;
+          ignore (dump t);
+          Error (`Msg err)
+      in
+      Lwt_result.lift (job_to_script_job t.cfgdir platform job) >>= function
+      | Error `Msg msg ->
+        Logs.err (fun m -> m "error %s converting job to script job" msg);
+        Lwt.return_unit
+      | Ok script_job ->
+        put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= function
+        | Error _ -> Lwt.return_unit
+        | Ok () ->
+          Logs.app (fun m -> m "job %a scheduled %a for %a"
                      Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
-        t.running <- UM.add uuid (Ptime_clock.now (), script_job, Lwt_condition.create (), []) t.running;
-        (* await output *)
-        let rec read_or_timeout () =
+          t.running <- UM.add uuid (Ptime_clock.now (), script_job, Lwt_condition.create (), []) t.running;
+          (* await output *)
           let timeout () =
             (* an hour should be enough for a job *)
             let open Lwt.Infix in
             let timeout = Duration.(to_f (of_hour 1)) in
-            Lwt_unix.sleep timeout >>= fun () ->
+            Lwt_unix.sleep timeout >|= fun () ->
             Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
+            `Timeout
+          in
+          let read_worker () =
+            let open Lwt.Infix in
+            let rec read_and_process_data () =
+              put_back_on_err (read_cmd fd) >>= function
+              | Ok Builder.Output (uuid, data) ->
+                Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
+                (match UM.find_opt uuid t.running with
+                 | None ->
+                   Logs.err (fun m -> m "unknown %a, discarding %S"
+                                Uuidm.pp uuid data)
+                 | Some (created, job, cond, out) ->
+                   let ts =
+                     let delta = Ptime.diff (Ptime_clock.now ()) created in
+                     Duration.of_f (Ptime.Span.to_float_s delta)
+                   in
+                   Lwt_condition.broadcast cond (`Data (ts, data));
+                   let value = created, job, cond, (ts, data) :: out in
+                   t.running <- UM.add uuid value t.running);
+                read_and_process_data ()
+              | Ok Builder.Job_finished (uuid, r, data) ->
+                Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
+                             Builder.pp_execution_result r);
+                job_finished t uuid r data
+              | Ok cmd ->
+                Logs.err (fun m -> m "expected output or job finished, got %a"
+                             Builder.pp_cmd cmd);
+                Lwt.return_unit
+              | Error _ -> Lwt.return_unit
+            in
+            read_and_process_data () >|= fun () ->
+            `Done
+          in
+          Lwt.pick [ timeout () ; read_worker () ] >>= function
+          | `Timeout ->
             job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
             add_to_queue t platform job;
-            ignore (dump t);
-            Ok ()
-          in
-          let read_and_process_data () =
-            put_back_on_err uuid (read_cmd fd) >>= function
-            | Builder.Output (uuid, data) ->
-              Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
-              (match UM.find_opt uuid t.running with
-               | None ->
-                 Logs.err (fun m -> m "unknown %a, discarding %S"
-                              Uuidm.pp uuid data)
-               | Some (created, job, cond, out) ->
-                 let ts =
-                   let delta = Ptime.diff (Ptime_clock.now ()) created in
-                   Duration.of_f (Ptime.Span.to_float_s delta)
-                 in
-                 Lwt_condition.broadcast cond (ts, data);
-                 let value = created, job, cond, (ts, data) :: out in
-                 t.running <- UM.add uuid value t.running);
-              read_or_timeout ()
-            | Builder.Job_finished (uuid, r, data) ->
-              Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
-                           Builder.pp_execution_result r);
-              Lwt_result.ok (job_finished t uuid r data)
-            | cmd ->
-              Logs.err (fun m -> m "expected output or job finished, got %a"
-                           Builder.pp_cmd cmd);
-              read_or_timeout ()
-          in
-          Lwt.pick [ timeout () ; read_and_process_data () ]
-        in
-        read_or_timeout ())
+            ignore (dump t)
+          | `Done -> Lwt.return_unit
+    end
+  | Ok cmd ->
+    Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
+    Lwt.return_unit
+  | Error `Msg msg ->
+    Logs.err (fun m -> m "error %s while reading from worker" msg);
+    Lwt.return_unit
+
+let maybe_schedule_job t p j =
+  if S.fold (fun { Builder.job ; _ } acc ->
+    if acc then not (Builder.job_equal job j) else acc)
+      t.schedule true
+    then
+      let now = Ptime_clock.now () in
+      schedule_job t now p j;
+      ignore (dump t);
+      Lwt.return (Ok ())
+    else
+      Lwt.return (Error (`Msg "job name already used"))
+
+let client_loop t fd =
+  let open Lwt_result.Infix in
+  read_cmd fd >>= function
   | Builder.Schedule (p, j) ->
     Logs.app (fun m -> m "%a schedule %a" Builder.pp_period p
                  Builder.pp_script_job j);
-    maybe_schedule_job p (Builder.Script_job j)
+    maybe_schedule_job t p (Builder.Script_job j)
   | Builder.Schedule_orb_build (p, j) ->
     Logs.app (fun m -> m "%a schedule orb build %a" Builder.pp_period p
                  Builder.pp_orb_build_job j);
-    maybe_schedule_job p (Builder.Orb_build_job j)
+    maybe_schedule_job t p (Builder.Orb_build_job j)
   | Builder.Unschedule name ->
     Logs.app (fun m -> m "unschedule %s" name);
+    let changed = ref false in
     let schedule =
       let s = S.create ~dummy 13 in
       S.iter (fun ({ Builder.job ; _ } as si) ->
           if not (String.equal (Builder.job_name job) name) then
             S.add s si
-          else ()) t.schedule;
+          else changed := true)
+        t.schedule;
       s
-    and queues =
-      SM.map (fun queue ->
-        let q = Queue.create () in
-        Queue.iter (fun job ->
-            if not (String.equal (Builder.job_name job) name) then
-              Queue.add job q
-            else
-              ())
-          queue;
-        q)
-      t.queues
     in
-    t.schedule <- schedule;
-    t.queues <- queues;
-    ignore (dump t);
-    Lwt.return (Ok ())
+    if !changed then begin
+      let queues =
+        SM.map (fun queue ->
+          let q = Queue.create () in
+          Queue.iter (fun job ->
+              if not (String.equal (Builder.job_name job) name) then
+                Queue.add job q
+              else
+                ())
+            queue;
+          q)
+        t.queues
+      in
+      t.schedule <- schedule;
+      t.queues <- queues;
+      ignore (dump t);
+      Lwt.return (Ok ())
+    end else
+      Lwt.return (Error (`Msg ("unknown job " ^ name)))
   | Builder.Execute name ->
-    begin
-      Logs.app (fun m -> m "execute %s" name);
-      reschedule_job t name (fun job period _next ->
-          (job, period, (Ptime_clock.now ())));
-      Lwt.return (Ok ())
-    end
+    Logs.app (fun m -> m "execute %s" name);
+    Lwt.return
+      (reschedule_job t name (fun job period _next ->
+        (job, period, (Ptime_clock.now ()))))
   | Builder.Reschedule (name, next, period) ->
-    begin
-      Logs.app (fun m -> m "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next);
-      reschedule_job t name (fun job orig_period _orig_next ->
-          (job, Option.value ~default:orig_period period, next));
-      Lwt.return (Ok ())
-    end
+    Logs.app (fun m -> m "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next);
+    Lwt.return
+      (reschedule_job t name (fun job orig_period _orig_next ->
+        (job, Option.value ~default:orig_period period, next)))
   | Builder.Info ->
     Logs.app (fun m -> m "info");
     let reply =
@@ -478,38 +472,84 @@ let handle t fd addr =
     begin match UM.find_opt id t.running with
       | Some (_, _, cond, out) ->
         let open Lwt.Infix in
-        let output id ts data = match hello with
-          (* We don't expect `Worker_hello... *)
-          | `Worker_hello -> Builder.Output (id, data)
-          | `Client_hello -> Builder.Output_timestamped (id, ts, data)
-        in
+        let output id ts data = Builder.Output_timestamped (id, ts, data) in
         Lwt_list.iter_s (fun (ts, l) ->
             write_cmd fd (output id ts l) >|= ignore)
           (List.rev out) >>= fun () ->
         let rec more () =
-          Lwt_condition.wait cond >>= fun (ts, data) ->
-          write_cmd fd (output id ts data) >>= function
-          | Ok () -> more ()
-          | Error _ -> Lwt.return (Ok ())
+          Lwt_condition.wait cond >>= function
+          | `End -> Lwt.return (Ok ())
+          | `Data (ts, data) ->
+            write_cmd fd (output id ts data) >>= function
+            | Ok () -> more ()
+            | Error _ -> Lwt.return (Ok ())
         in
         more ()
-      | None ->
-        (* TODO figure which job name this may be *)
-        (* maybe more useful to get latest result of <job-name>? *)
-        Logs.err (fun m -> m "not implemented: job not executing");
-        Lwt.return (Ok ())
+      | None -> Lwt.return (Error (`Msg "uuid not found"))
     end
   | Builder.Drop_platform p ->
-    t.queues <- SM.remove p t.queues;
-    Lwt.return (Ok ())
+    if SM.mem p t.queues then begin
+      t.queues <- SM.remove p t.queues;
+      Lwt.return (Ok ())
+    end else
+      Lwt.return (Error (`Msg ("unknown platform " ^ p)))
   | cmd ->
     Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
     Lwt_result.lift (Error (`Msg "bad communication"))
 
+let handle t fd addr =
+  (* -- client connection:
+     (1) read client hello (or client hello 2)
+     (2) send server hello
+     -- now there are different paths:
+     (3) read request job
+     (4) send job
+     (5) await job done
+     -- or scheduling a job
+     (3) read schedule
+     -- or unscheduling a job
+     (3) read unschedule
+     -- or info
+     (3) read info
+     (4) send info_reply
+     -- or observing
+     (3) read observe
+     (4) send outputs and job done
+  *)
+  Logs.app (fun m -> m "client connection from %a" pp_sockaddr addr);
+  read_cmd fd >>= function
+  | Ok (Builder.Client_hello (`Client, n)) when n = Builder.client_version ->
+    begin
+      write_cmd fd Builder.Server_hello >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok () ->
+        client_loop t fd >>= fun r ->
+        let to_client = match r with
+          | Ok _ -> Builder.Success
+          | Error `Msg msg ->
+            Logs.info (fun m -> m "error while processing client command %s" msg);
+            Builder.Failure msg
+         in
+         write_cmd fd to_client >|= fun _ ->
+         ()
+    end
+  | Ok (Builder.Client_hello (`Worker, n)) when n = Builder.worker_version ->
+    begin
+      write_cmd fd Builder.Server_hello >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok () -> worker_loop t addr fd
+    end
+  | Ok cmd ->
+    Logs.err (fun m -> m "expected client hello, got %a" Builder.pp_cmd cmd);
+    Lwt.return_unit
+  | Error `Msg msg ->
+    Logs.err (fun m -> m "error %s while reading client hello" msg);
+    Lwt.return_unit
+
 let jump () ip port dbdir cfgdir url =
   Lwt_main.run
     (Sys.(set_signal sigpipe Signal_ignore);
-     let d = Fpath.v dbdir 
+     let d = Fpath.v dbdir
      and cfg = Fpath.v cfgdir
      in
      Lwt_result.lift (restore url d cfg) >>= fun state ->
@@ -530,10 +570,8 @@ let jump () ip port dbdir cfgdir url =
          let rec loop () =
            Lwt_unix.accept s >>= fun (fd, addr) ->
            Lwt.async (fun () ->
-               (handle state fd addr >|= function
-                | Ok () -> ()
-                | Error `Msg msg -> Logs.err (fun m -> m "error %s" msg)) >>= fun () ->
-               Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit));
+             handle state fd addr >>= fun () ->
+             Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit));
            loop ()
          in
          loop ())

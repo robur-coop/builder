@@ -96,7 +96,7 @@ type cmd =
   | Job_requested of string (* worker *)
   | Job_schedule of Uuidm.t * script_job (* worker *)
   | Job_finished of Uuidm.t * execution_result * data (* worker *)
-  | Output of Uuidm.t * string (* worker and client *)
+  | Output of Uuidm.t * string (* worker *)
   | Output_timestamped of Uuidm.t * int64 * string (* client *)
   | Schedule of period * script_job (* client *)
   | Unschedule of string (* client *)
@@ -109,6 +109,8 @@ type cmd =
   | Drop_platform of string (* client *)
   | Client_hello of [ `Client | `Worker ] * int
   | Server_hello
+  | Success (* client *)
+  | Failure of string (* client *)
 
 let client_version = 11
 let worker_version = 5
@@ -145,6 +147,8 @@ let pp_cmd ppf = function
     Fmt.pf ppf "client hello %s %d"
       (match t with `Client -> "client" | `Worker -> "worker") num
   | Server_hello -> Fmt.string ppf "server hello"
+  | Success -> Fmt.string ppf "success"
+  | Failure msg -> Fmt.pf ppf "failure %s" msg
 
 type state_item =
   | Queue of string * job list
@@ -377,6 +381,8 @@ module Asn = struct
       | `C3 `C4 () -> Server_hello
       | `C3 `C5 platform -> Job_requested platform
       | `C3 `C6 platform -> Drop_platform platform
+      | `C4 `C1 () -> Success
+      | `C4 `C2 msg -> Failure msg
     and g = function
       | Job_schedule (uuid, job) -> `C1 (`C3 (uuid, job))
       | Job_finished (uuid, res, data) -> `C1 (`C4 (uuid, res, data))
@@ -395,9 +401,11 @@ module Asn = struct
       | Server_hello -> `C3 (`C4 ())
       | Job_requested platform -> `C3 (`C5 platform)
       | Drop_platform platform -> `C3 (`C6 platform)
+      | Success -> `C4 (`C1 ())
+      | Failure msg -> `C4 (`C2 msg)
     in
     Asn.S.(map f g
-             (choice3
+             (choice4
                 (choice6
                    (explicit 0 int)
                    (explicit 1 int)
@@ -447,7 +455,10 @@ module Asn = struct
                      (required ~label:"version" int)))
                    (explicit 15 null)
                    (explicit 16 utf8_string)
-                   (explicit 17 utf8_string)
+                   (explicit 17 utf8_string))
+                (choice2
+                   (explicit 18 null)
+                   (explicit 19 utf8_string)
                 )))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd
