@@ -357,14 +357,12 @@ let worker_loop t addr fd =
           (* await output *)
           let timeout () =
             (* an hour should be enough for a job *)
-            let open Lwt.Infix in
             let timeout = Duration.(to_f (of_hour 1)) in
             Lwt_unix.sleep timeout >|= fun () ->
             Logs.warn (fun m -> m "%a timeout after %f seconds" Uuidm.pp uuid timeout);
             `Timeout
           in
           let read_worker () =
-            let open Lwt.Infix in
             let rec read_and_process_data () =
               put_back_on_err (read_cmd fd) >>= function
               | Ok Builder.Output (uuid', data) ->
