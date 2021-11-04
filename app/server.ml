@@ -367,8 +367,10 @@ let worker_loop t addr fd =
             let open Lwt.Infix in
             let rec read_and_process_data () =
               put_back_on_err (read_cmd fd) >>= function
-              | Ok Builder.Output (uuid, data) ->
+              | Ok Builder.Output (uuid', data) ->
                 Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
+                if not (Uuidm.equal uuid uuid') then
+                  Logs.warn (fun m -> m "got job %a, expected %a" Uuidm.pp uuid' Uuidm.pp uuid);
                 (match UM.find_opt uuid t.running with
                  | None ->
                    Logs.err (fun m -> m "unknown %a, discarding %S"
@@ -382,7 +384,9 @@ let worker_loop t addr fd =
                    let value = created, job, cond, (ts, data) :: out in
                    t.running <- UM.add uuid value t.running);
                 read_and_process_data ()
-              | Ok Builder.Job_finished (uuid, r, data) ->
+              | Ok Builder.Job_finished (uuid', r, data) ->
+                if not (Uuidm.equal uuid uuid') then
+                  Logs.warn (fun m -> m "got job %a, expected %a" Uuidm.pp uuid' Uuidm.pp uuid);
                 Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
                              Builder.pp_execution_result r);
                 job_finished t uuid r data
