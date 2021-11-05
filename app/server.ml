@@ -328,7 +328,10 @@ let worker_loop t addr fd =
       let rec find_job () =
         let queue = find_queue t platform in
         match Queue.take_opt queue with
-        | None -> Lwt_condition.wait t.waiter >>= find_job
+        | None ->
+          if not (template_exists t.cfgdir platform) then
+            Logs.warn (fun m -> m "no template for %s" platform);
+          Lwt_condition.wait t.waiter >>= find_job
         | Some job -> Lwt.return job
       in
       find_job () >>= fun job ->
@@ -338,7 +341,8 @@ let worker_loop t addr fd =
         f >|= function
         | Ok a -> Ok a
         | Error `Msg err ->
-          Logs.warn (fun m -> m "communication failure %s with %a, job %a put back"
+          Logs.warn (fun m -> m "%a communication failure %s with %a, job %a put back"
+                        Uuidm.pp uuid
                         err Builder.pp_job job pp_sockaddr addr);
           t.running <- UM.remove uuid t.running;
           add_to_queue t platform job;
@@ -347,14 +351,15 @@ let worker_loop t addr fd =
       in
       Lwt_result.lift (job_to_script_job t.cfgdir platform job) >>= function
       | Error `Msg msg ->
-        Logs.err (fun m -> m "error %s converting job to script job" msg);
+        Logs.warn (fun m -> m "%a error converting job %a to script job: %s"
+                      Uuidm.pp uuid Builder.pp_job job msg);
         Lwt.return_unit
       | Ok script_job ->
+        Logs.app (fun m -> m "job %a scheduled %a for %a"
+                     Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
         put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= function
         | Error _ -> Lwt.return_unit
         | Ok () ->
-          Logs.app (fun m -> m "job %a scheduled %a for %a"
-                     Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
           t.running <- UM.add uuid (Ptime_clock.now (), script_job, Lwt_condition.create (), []) t.running;
           (* await output *)
           let timeout () =
