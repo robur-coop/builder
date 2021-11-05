@@ -103,8 +103,10 @@ let find_queue t p =
       | Builder.Orb_build_job _ ->
         if template_present then Queue.add job q)
       t.schedule;
-    if not (Queue.is_empty q) then
+    if not (Queue.is_empty q) then begin
       t.queues <- SM.add p q t.queues;
+      Lwt_condition.broadcast t.waiter ();
+    end;
     q
 
 let p_to_span p =
