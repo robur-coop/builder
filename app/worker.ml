@@ -21,8 +21,12 @@ let read_console_write_network s fd uuid =
   let ch = Unix.in_channel_of_descr fd in
   let rec read_write () =
     let line = input_line ch in
-    Builder.write_cmd s (Builder.Output (uuid, line)) |> ignore; (* TODO *)
-    read_write ()
+    match Builder.write_cmd s (Builder.Output (uuid, line)) with
+    | Ok () -> read_write ()
+    | Error `Msg msg ->
+      Logs.err (fun m -> m "communication with server failed %s" msg);
+      Unix.kill 0 9;
+      exit 1
   in
   try read_write () with End_of_file -> exit 0
 
@@ -117,7 +121,7 @@ let jump () platform (host, port) =
       Error (`Msg "connect failure")
   in
   let r =
-    let* () = Builder.(write_cmd s (Client_hello (`Worker, worker_version))) in 
+    let* () = Builder.(write_cmd s (Client_hello (`Worker, worker_version))) in
     Logs.debug (fun m -> m "waiting for server hello");
     let* cmd = Builder.read_cmd s in
     let* () = if cmd = Builder.Server_hello then Ok () else Error (`Msg "bad command (expected server hello") in
