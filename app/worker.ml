@@ -87,8 +87,7 @@ let execute_job s uuid job =
       let _ = Unix.waitpid [] f in
       (* Unix.kill f 9; *)
       let res = match snd r with
-        | Unix.WEXITED 0 -> Builder.Exited 0, collect_output tmpdir
-        | Unix.WEXITED c -> Builder.Exited c, []
+        | Unix.WEXITED c -> Builder.Exited c, collect_output tmpdir
         | Unix.WSIGNALED s -> Builder.Signalled s, []
         | Unix.WSTOPPED s -> Builder.Stopped s, []
       in
