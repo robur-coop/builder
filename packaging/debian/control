@@ -1,5 +1,5 @@
 Package: builder
-Version: 0.0.1-%%VERSION_NUM%%
+Version: %%VERSION_NUM%%
 Section: unknown
 Priority: optional
 Maintainer: Robur Team <team@robur.coop>
