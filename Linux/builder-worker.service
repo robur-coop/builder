@@ -5,7 +5,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/docker run --rm --name %n ubuntu:20.04 sh -c 'apt update; apt install --no-install-recommends --no-install-suggests -y wget ca-certificates; wget -o builder.deb 'https://builds.robur.coop/job/builder/build/latest/f/bin/builder.deb?platform=ubuntu-20.04'; apt install -y ./builder.deb; builder-worker -r 172.17.0.1:1234'
+ExecStart=/usr/bin/docker run --rm --name %n ubuntu:20.04 sh -c 'apt update; apt install --no-install-recommends --no-install-suggests -y wget ca-certificates; wget -O builder.deb "https://builds.robur.coop/job/builder/build/latest/f/bin/builder.deb?platform=ubuntu-20.04"; apt install -y ./builder.deb; builder-worker -r 172.17.0.1:1234'
 ExecStop=/usr/bin/docker stop %n
 # Apparently this is needed in case "docker run" dies for other reasons.
 ExecStopPost=/usr/bin/docker stop %n
