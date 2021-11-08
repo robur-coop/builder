@@ -132,7 +132,8 @@ let jump () platform (host, port) =
     let* cmd = Builder.read_cmd s in
     match cmd with
     | Builder.Job_schedule (uuid, job) ->
-      Logs.app (fun m -> m "received job uuid %a: %a" Uuidm.pp uuid Builder.pp_script_job job);
+      Logs.app (fun m -> m "%d received job uuid %a: %a" (Unix.getpid ())
+                  Uuidm.pp uuid Builder.pp_script_job job);
       let r, data = execute_job s uuid job in
       Logs.debug (fun m -> m "executed job");
       Builder.(write_cmd s (Job_finished (uuid, r, data)))
