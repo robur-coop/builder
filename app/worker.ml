@@ -83,9 +83,12 @@ let execute_job s uuid job =
         Unix.create_process "/bin/sh" [| "-e" ; toexec |] Unix.stdin out out
       in
       let r = Unix.waitpid [] pid in
-      Unix.close out;
-      let _ = Unix.waitpid [] f in
-      (* Unix.kill f 9; *)
+      (try
+         Unix.close out;
+         ignore (Unix.waitpid [] f)
+       with Unix.Unix_error(_, _, _) as e ->
+         Logs.warn (fun m -> m "exception during close or waitpid %s"
+                      (Printexc.to_string e)));
       let res = match snd r with
         | Unix.WEXITED c -> Builder.Exited c, collect_output tmpdir
         | Unix.WSIGNALED s -> Builder.Signalled s, []
