@@ -97,9 +97,9 @@ let unschedule () remote name =
   let* () = Builder.write_cmd s (Builder.Unschedule name) in
   teardown s
 
-let execute () remote name =
+let execute () remote name platform =
   let* s = connect remote in
-  let* () = Builder.write_cmd s (Builder.Execute name) in
+  let* () = Builder.write_cmd s (Builder.Execute (name, platform)) in
   teardown s
 
 let schedule () remote name platform script period =
@@ -252,7 +252,7 @@ let reschedule_cmd =
   Term.info "reschedule"
 
 let execute_cmd =
-  Term.(term_result (const execute $ setup_log $ remote $ nam)),
+  Term.(term_result (const execute $ setup_log $ remote $ nam $ platform_opt)),
   Term.info "execute"
 
 let drop_platform_cmd =

@@ -62,6 +62,10 @@ let pp_job ppf = function
 let job_equal a b =
    String.equal (job_name a) (job_name b)
 
+let job_platform = function
+  | Script_job { platform; _ } -> Some platform
+  | Orb_build_job _ -> None
+
 type schedule_item = {
   next : Ptime.t ;
   period : period ;
@@ -103,7 +107,7 @@ type cmd =
   | Info (* client *)
   | Info_reply of info (* client *)
   | Observe of Uuidm.t (* client *)
-  | Execute of string (* client *)
+  | Execute of string * string option (* client *)
   | Schedule_orb_build of period * orb_build_job (* client *)
   | Reschedule of string * Ptime.t * period option (* client *)
   | Drop_platform of string (* client *)
@@ -112,7 +116,7 @@ type cmd =
   | Success (* client *)
   | Failure of string (* client *)
 
-let client_version = 11
+let client_version = 12
 let worker_version = 5
 
 let version =
@@ -134,7 +138,8 @@ let pp_cmd ppf = function
   | Info -> Fmt.string ppf "info"
   | Info_reply info -> Fmt.pf ppf "info: %a" pp_info info
   | Observe id -> Fmt.pf ppf "observe %a" Uuidm.pp id
-  | Execute name -> Fmt.pf ppf "execute %s" name
+  | Execute (name, platform) ->
+    Fmt.pf ppf "execute %s on %a" name Fmt.(option ~none:(any "any platform") string) platform
   | Schedule_orb_build (period, orb_job) ->
     Fmt.pf ppf "schedule orb build at %a: %a" pp_period period pp_orb_build_job orb_job
   | Reschedule (name, next, None) ->
@@ -374,7 +379,7 @@ module Asn = struct
       | `C2 `C3 () -> assert false
       | `C2 `C4 jn -> Unschedule jn
       | `C2 `C5 id -> Observe id
-      | `C2 `C6 jn -> Execute jn
+      | `C2 `C6 jn -> Execute (jn, None)
       | `C3 `C1 (period, orb_job) -> Schedule_orb_build (period, orb_job)
       | `C3 `C2 (name, next, period) -> Reschedule (name, next, period)
       | `C3 `C3 (t, n) -> Client_hello (t, n)
@@ -383,6 +388,7 @@ module Asn = struct
       | `C3 `C6 platform -> Drop_platform platform
       | `C4 `C1 () -> Success
       | `C4 `C2 msg -> Failure msg
+      | `C4 `C3 (name, platform) -> Execute (name, platform)
     and g = function
       | Job_schedule (uuid, job) -> `C1 (`C3 (uuid, job))
       | Job_finished (uuid, res, data) -> `C1 (`C4 (uuid, res, data))
@@ -394,7 +400,6 @@ module Asn = struct
         `C2 (`C2 (schedule, queues, running))
       | Unschedule jn -> `C2 (`C4 jn)
       | Observe id -> `C2 (`C5 id)
-      | Execute jn -> `C2 (`C6 jn)
       | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
       | Reschedule (name, next, period) -> `C3 (`C2 (name, next, period))
       | Client_hello (t, n) -> `C3 (`C3 (t, n))
@@ -403,6 +408,7 @@ module Asn = struct
       | Drop_platform platform -> `C3 (`C6 platform)
       | Success -> `C4 (`C1 ())
       | Failure msg -> `C4 (`C2 msg)
+      | Execute (job, platform) -> `C4 (`C3 (job, platform))
     in
     Asn.S.(map f g
              (choice4
@@ -456,9 +462,12 @@ module Asn = struct
                    (explicit 15 null)
                    (explicit 16 utf8_string)
                    (explicit 17 utf8_string))
-                (choice2
+                (choice3
                    (explicit 18 null)
                    (explicit 19 utf8_string)
+                   (explicit 20 (sequence2
+                     (required ~label:"job_name" utf8_string)
+                     (optional ~label:"platform" utf8_string)))
                 )))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd

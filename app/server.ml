@@ -134,22 +134,40 @@ let move_to_front q q' j =
     (fun job -> if not (Builder.job_equal j job) then Queue.add job q')
     q
 
-let add_to_front_of_queues t = function
-  | Builder.Orb_build_job _ as job ->
-    let queues = SM.map (fun q ->
-      let q' = Queue.create () in
-      move_to_front q q' job;
-      q')
-      t.queues
-    in
-    t.queues <- queues;
-    Lwt_condition.broadcast t.waiter ()
-  | Builder.Script_job { platform ; _ } as job ->
-    let q = find_queue t platform in
+let add_to_front_of_queues t name platform =
+  let find_job schedule name =
+    S.fold (fun { job; _ } (acc : Builder.job option) ->
+        let curr = if Builder.job_name job = name then Some job else None in
+        match curr, acc with
+        | None, None -> None
+        | Some job, None | None, Some job -> Some job
+        | Some _, Some _ -> assert false) (* XXX: assumption: job names are unique *)
+      schedule None
+  in
+  let recreate_queue j q =
     let q' = Queue.create () in
-    move_to_front q q' job;
-    t.queues <- SM.add platform q' t.queues;
-    Lwt_condition.broadcast t.waiter ()
+    move_to_front q q' j;
+    q'
+  in
+  let find_queue platform =
+    SM.find_opt platform t.queues
+    |> Option.to_result ~none:(`Msg "no such platform")
+  in
+  let* job = Option.to_result ~none:(`Msg "job not found") (find_job t.schedule name) in
+  match Builder.job_platform job, platform with
+  | None, None ->
+    t.queues <- SM.map (recreate_queue job) t.queues;
+    Ok ()
+  | Some platform, None | None, Some platform ->
+    let* q = find_queue platform in
+    t.queues <- SM.add platform (recreate_queue job q) t.queues;
+    Ok ()
+  | Some platform, Some p when String.equal platform p ->
+    let* q = find_queue platform in
+    t.queues <- SM.add platform (recreate_queue job q) t.queues;
+    Ok ()
+  | Some platform, Some _ ->
+    Error (`Msg ("job is for a different platform: " ^ platform))
 
 let queue_contains j =
   Queue.fold (fun acc job -> acc || Builder.job_equal j job) false
@@ -474,12 +492,16 @@ let client_loop t fd =
       Lwt.return (Ok ())
     end else
       Lwt.return (Error (`Msg ("unknown job " ^ name)))
-  | Builder.Execute name ->
-    Logs.app (fun m -> m "execute %s" name);
-    begin match reschedule_job t name (fun period -> period, Ptime_clock.now ()) with
-      | Ok j -> add_to_front_of_queues t j; ignore (dump t); Lwt.return (Ok ())
-      | Error e -> Lwt.return (Error e)
-    end
+  | Builder.Execute (name, platform) as cmd ->
+    Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
+    let r = add_to_front_of_queues t name platform in
+    Result.fold r
+      ~ok:(fun () ->
+        ignore (dump t);
+        Lwt_condition.broadcast t.waiter (); 
+        Lwt.return (Ok ()))
+      ~error:(fun (`Msg m) ->
+        Lwt.return (Error (`Msg ("execute failed: " ^ m))))
   | Builder.Reschedule (name, next, period) ->
     Logs.app (fun m -> m "reschedule %s: %a" name (Ptime.pp_rfc3339 ()) next);
     begin match
