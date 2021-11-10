@@ -50,7 +50,7 @@ let observe_uuid uuid remote =
   in
   read ()
 
-let observe_latest () remote =
+let observe_latest () remote platform job_name =
   let* reply =
     let* s = connect remote in
     let* () = Builder.write_cmd s Builder.Info in
@@ -58,14 +58,18 @@ let observe_latest () remote =
     ignore (teardown s);
     r
   in
+  let is_platform p = match platform with None -> true | Some p' -> String.equal p p' in
+  let is_job p = match job_name with None -> true | Some p' -> String.equal p p' in
   match reply with
   | Info_reply { Builder.running ; _ } ->
     (match List.fold_left
              (fun acc ((start, _, _) as x) ->
                 match acc with
                 | None -> Some x
-                | Some (start', _, _) ->
-                  if Ptime.is_later start ~than:start'
+                | Some (start', _, job) ->
+                  if is_platform job.Builder.platform
+                  && is_job job.Builder.name
+                  && Ptime.is_later start ~than:start'
                   then Some x else acc)
              None running
      with
@@ -202,13 +206,21 @@ let opam_package =
   let doc = "The opam package to build" in
   Arg.(required & pos 1 (some string) None & info [ ] ~doc ~docv:"OPAM")
 
+let platform_opt =
+  let doc = "The platform to observe" in
+  Arg.(value & opt (some string) None & info [ "platform" ] ~doc ~docv:"PLATFORM")
+
+let job_name_opt =
+  let doc = "The job name to observe" in
+  Arg.(value & opt (some string) None & info [ "job" ] ~doc ~docv:"JOB")
+
 let setup_log =
   Term.(const setup_log
         $ Fmt_cli.style_renderer ()
         $ Logs_cli.level ())
 
 let observe_latest_cmd =
-  Term.(term_result (const observe_latest $ setup_log $ remote)),
+  Term.(term_result (const observe_latest $ setup_log $ remote $ platform_opt $ job_name_opt)),
   Term.info "observe-latest"
 
 let observe_cmd =
