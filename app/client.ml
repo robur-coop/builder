@@ -71,7 +71,8 @@ let observe_latest () remote =
      with
      | None -> Error (`Msg "No running jobs")
      | Some (_start, uuid, job) ->
-       Logs.app (fun m -> m "Observing %s (%a)" job.Builder.name Uuidm.pp uuid);
+       Logs.app (fun m -> m "Observing %s on %s (%a)"
+                    job.Builder.name job.Builder.platform Uuidm.pp uuid);
        observe_uuid uuid remote)
   | cmd -> Error (`Msg (Fmt.str "Unexpected reply to 'info': %a" Builder.pp_cmd cmd))
 
