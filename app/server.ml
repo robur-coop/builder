@@ -330,7 +330,7 @@ let worker_loop t addr fd =
         match Queue.take_opt queue with
         | None ->
           if not (template_exists t.cfgdir platform) then
-            Logs.warn (fun m -> m "no template for %s" platform);
+            Logs.warn (fun m -> m "no template for %S" platform);
           Lwt_condition.wait t.waiter >>= find_job
         | Some job -> Lwt.return job
       in
@@ -355,8 +355,8 @@ let worker_loop t addr fd =
                       Uuidm.pp uuid Builder.pp_job job msg);
         Lwt.return_unit
       | Ok script_job ->
-        Logs.app (fun m -> m "job %a scheduled %a for %a"
-                     Uuidm.pp uuid Builder.pp_job job pp_sockaddr addr);
+        Logs.app (fun m -> m "%a on platform %S job scheduled %a for %a"
+                     Uuidm.pp uuid platform Builder.pp_job job pp_sockaddr addr);
         put_back_on_err (write_cmd fd (Builder.Job_schedule (uuid, script_job))) >>= function
         | Error _ -> Lwt.return_unit
         | Ok () ->
@@ -373,12 +373,12 @@ let worker_loop t addr fd =
             let rec read_and_process_data () =
               put_back_on_err (read_cmd fd) >>= function
               | Ok Builder.Output (uuid', data) ->
-                Logs.debug (fun m -> m "job %a output %S" Uuidm.pp uuid data);
+                Logs.debug (fun m -> m "%a output %S" Uuidm.pp uuid data);
                 if not (Uuidm.equal uuid uuid') then
-                  Logs.warn (fun m -> m "got job %a, expected %a" Uuidm.pp uuid' Uuidm.pp uuid);
+                  Logs.warn (fun m -> m "%a got uuid %a" Uuidm.pp uuid Uuidm.pp uuid');
                 (match UM.find_opt uuid t.running with
                  | None ->
-                   Logs.err (fun m -> m "unknown %a, discarding %S"
+                   Logs.err (fun m -> m "%a unknown in uuid map, discarding %S"
                                 Uuidm.pp uuid data)
                  | Some (created, job, cond, out) ->
                    let ts =
@@ -391,13 +391,13 @@ let worker_loop t addr fd =
                 read_and_process_data ()
               | Ok Builder.Job_finished (uuid', r, data) ->
                 if not (Uuidm.equal uuid uuid') then
-                  Logs.warn (fun m -> m "got job %a, expected %a" Uuidm.pp uuid' Uuidm.pp uuid);
-                Logs.app (fun m -> m "job %a finished with %a" Uuidm.pp uuid
+                  Logs.warn (fun m -> m "%a got uuid %a" Uuidm.pp uuid Uuidm.pp uuid');
+                Logs.app (fun m -> m "%a finished with %a" Uuidm.pp uuid
                              Builder.pp_execution_result r);
                 job_finished t uuid r data
               | Ok cmd ->
-                Logs.err (fun m -> m "expected output or job finished, got %a"
-                             Builder.pp_cmd cmd);
+                Logs.err (fun m -> m "%a expected output or job finished, got %a"
+                             Uuidm.pp uuid Builder.pp_cmd cmd);
                 Lwt.return_unit
               | Error _ -> Lwt.return_unit
             in
@@ -406,6 +406,7 @@ let worker_loop t addr fd =
           in
           Lwt.pick [ timeout () ; read_worker () ] >>= function
           | `Timeout ->
+            Logs.warn (fun m -> m "%a timed out" Uuidm.pp uuid);
             job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
             add_to_queue t platform job;
             ignore (dump t)
