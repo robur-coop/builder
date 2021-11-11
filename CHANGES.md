@@ -1,3 +1,15 @@
+# v0.3.0 (2021-11-11)
+
+* server: unstuck waiting workers when a new queue is created for a platform
+* server: warn when a worker requests a job for a new platform when a template
+  does not exist
+* server: improve logging of workers (always prefix uuid)
+* worker: kill process group when server communication fails
+* worker: collect output on any exit code
+* client: observe-latest has optional platform and job_name arguments
+* client: execute has an optional platform argument
+* Debian and FreeBSD packaging improvements
+
 # v0.2.0 (2021-11-04)
 
 * Client: print relative timestamp for worker output
