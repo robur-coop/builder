@@ -97,11 +97,10 @@ let find_queue t p =
     let template_present = template_exists t.cfgdir p in
     let q = Queue.create () in
     S.iter (fun { job ; _ } ->
-      match job with
-      | Builder.Script_job { platform  ; _ } ->
-        if String.equal platform p then Queue.add job q
-      | Builder.Orb_build_job _ ->
-        if template_present then Queue.add job q)
+      match Builder.job_platform job with
+      | Some plat when String.equal plat p -> Queue.add job q
+      | None when template_present -> Queue.add job q
+      | _ -> ())
       t.schedule;
     if not (Queue.is_empty q) then begin
       t.queues <- SM.add p q t.queues;
