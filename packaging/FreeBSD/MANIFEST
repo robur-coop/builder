@@ -14,6 +14,46 @@ deps {
         origin = "math/gmp";
     },
 }
+scripts : {
+    pre-install = <<EOD
+if [ -n "${PKG_ROOTDIR}" ] && [ "${PKG_ROOTDIR}" != "/" ]; then
+  PW="/usr/sbin/pw -R ${PKG_ROOTDIR}"
+else
+  PW=/usr/sbin/pw
+fi
+echo "===> Creating groups."
+if ! ${PW} groupshow builder >/dev/null 2>&1; then
+  echo "Creating group 'builder' with gid '497'."
+  ${PW} groupadd builder -g 497
+else
+  echo "Using existing group 'builder'."
+fi
+echo "===> Creating users"
+if ! ${PW} usershow builder >/dev/null 2>&1; then
+  echo "Creating user 'builder' with uid '497'."
+  ${PW} useradd builder -u 497 -g 497  -c "builder daemon" -d /nonexistent -s /usr/sbin/nologin
+else
+  echo "Using existing user 'builder'."
+fi
+EOD;
+    post-install = <<EOD
+mkdir -p -m 700 /var/db/builder
+chown builder:builder /var/db/builder
+
+EOD;
+    post-deinstall = <<EOD
+if [ -n "${PKG_ROOTDIR}" ] && [ "${PKG_ROOTDIR}" != "/" ]; then
+  PW="/usr/sbin/pw -R ${PKG_ROOTDIR}"
+else
+  PW=/usr/sbin/pw
+fi
+if ${PW} usershow builder >/dev/null 2>&1; then
+  echo "==> You should manually remove the \"builder\" user. "
+fi
+if ${PW} groupshow builder >/dev/null 2>&1; then
+  echo "==> You should manually remove the \"builder\" group "
+fi
+EOD;
 
 desc = <<EOD
 A server and client conducting build jobs
