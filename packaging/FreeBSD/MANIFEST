@@ -55,6 +55,7 @@ if ${PW} groupshow builder >/dev/null 2>&1; then
 fi
 EOD;
 
+}
 desc = <<EOD
 A server and client conducting build jobs
 
