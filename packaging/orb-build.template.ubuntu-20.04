@@ -6,5 +6,7 @@ wget -O orb.deb 'https://builds.robur.coop/job/orb/build/latest/f/bin/orb.deb?pl
 apt install --no-install-recommends --no-install-suggests -y ./orb.deb
 rm orb.deb
 
+DEBIAN_FRONTEND=noninteractive apt install --no-install-recommends --no-install-suggests -y dh-exec
+
 repos="default:https://opam.ocaml.org,unikernels:https://git.robur.io/robur/unikernel-repo.git"
 orb build --disable-sandboxing --solver-timeout=600 --switch-name=/tmp/myswitch --date=1589138087 --out=. --repos=$repos %%OPAM_PACKAGE%%
