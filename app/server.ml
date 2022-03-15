@@ -690,7 +690,10 @@ let upload =
   Arg.(value & opt (some string) None & info [ "upload" ] ~doc)
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ ip $ port $ dbdir $ cfgdir $ upload)),
-  Term.info "builder-server" ~version:Builder.version
+  let term =
+    Term.(term_result (const jump $ setup_log $ ip $ port $ dbdir $ cfgdir $ upload))
+  and info = Cmd.info "builder-server" ~version:Builder.version
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)
