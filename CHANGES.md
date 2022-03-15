@@ -1,3 +1,14 @@
+# v0.3.1 (2022-03-15)
+
+* Debian postinstall: create user/group conditionally, systemd daemon-reload
+* FreeBSD packaging: add user/group for builder, create /var/db/builder
+* Debian packaging: set architecture to DEB_TARGET_ARCH
+* FreeBSD packaging: normalize version (. instead of -)
+* Debian template: install dh-exec
+* Refactor builder-worker.server: split long ExecStart line, use variables
+  for builder platform and docker image, pass platform to builder-worker
+* Update to cmdliner 1.1.0
+
 # v0.3.0 (2021-11-11)
 
 * server: unstuck waiting workers when a new queue is created for a platform
