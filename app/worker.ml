@@ -152,19 +152,20 @@ let setup_log style_renderer level =
 
 open Cmdliner
 
-let host_port : (Unix.inet_addr * int) Arg.converter =
+let host_port =
   let parse s =
     match String.split_on_char ':' s with
     | [ hostname ;  port ] ->
       begin try
-          `Ok (Unix.inet_addr_of_string hostname, int_of_string port)
+          Ok (Unix.inet_addr_of_string hostname, int_of_string port)
         with
-          Not_found -> `Error "failed to parse IP:port"
+          Not_found -> Error (`Msg "failed to parse IP:port")
       end
-    | _ -> `Error "broken: no port specified"
+    | _ -> Error (`Msg "broken: no port specified")
+  and pp ppf (h, p) =
+    Format.fprintf ppf "%s:%d" (Unix.string_of_inet_addr h) p
   in
-  parse, fun ppf (h, p) -> Format.fprintf ppf "%s:%d"
-      (Unix.string_of_inet_addr h) p
+  Arg.conv (parse, pp)
 
 let remote =
   let doc = "The remote host:port to connect to" in
@@ -181,7 +182,9 @@ let setup_log =
         $ Logs_cli.level ())
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ platform $ remote)),
-  Term.info "builder-worker" ~version:Builder.version
+  let term = Term.(term_result (const jump $ setup_log $ platform $ remote))
+  and info = Cmd.info "builder-worker" ~version:Builder.version
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)

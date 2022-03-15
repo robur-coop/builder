@@ -61,7 +61,10 @@ let file =
   Arg.(required & pos 0 (some file) None & info [ ] ~doc ~docv:"FILE")
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ file $ console $ script $ output)),
-  Term.info "builder-inspect" ~version:Builder.version
+  let term =
+    Term.(term_result (const jump $ setup_log $ file $ console $ script $ output))
+  and info = Cmd.info "builder-inspect" ~version:Builder.version
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)
