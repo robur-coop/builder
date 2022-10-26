@@ -254,7 +254,8 @@ let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full)
 
 let upload happy_eyeballs url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
-  Http_lwt_client.one_request ~happy_eyeballs ~meth:`POST ~body url >|= function
+  let body_f acc data = Lwt.return (acc ^ data) in
+  Http_lwt_client.request ~happy_eyeballs ~meth:`POST ~body url body_f "" >|= function
   | Ok (resp, body) ->
     if Http_lwt_client.Status.is_successful resp.Http_lwt_client.status then begin
       Logs.info (fun m -> m "successful upload (HTTP %s)"
@@ -263,7 +264,7 @@ let upload happy_eyeballs url dir full =
     end else begin
       Logs.err (fun m -> m "upload failed (HTTP %s, body: %s), saving to %a"
                    (Http_lwt_client.Status.to_string resp.Http_lwt_client.status)
-                   (match body with None -> "" | Some x -> x) Fpath.pp dir);
+                   body Fpath.pp dir);
       save_to_disk dir full
     end
   | Error `Msg e ->
