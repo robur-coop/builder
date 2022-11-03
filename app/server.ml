@@ -254,7 +254,7 @@ let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full)
 
 let upload happy_eyeballs url dir full =
   let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
-  let body_f acc data = Lwt.return (acc ^ data) in
+  let body_f _ acc data = Lwt.return (acc ^ data) in
   Http_lwt_client.request ~happy_eyeballs ~meth:`POST ~body url body_f "" >|= function
   | Ok (resp, body) ->
     if Http_lwt_client.Status.is_successful resp.Http_lwt_client.status then begin
