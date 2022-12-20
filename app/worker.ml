@@ -134,9 +134,24 @@ let jump () platform (host, port) =
     | Builder.Job_schedule (uuid, job) ->
       Logs.app (fun m -> m "%d received job uuid %a: %a" (Unix.getpid ())
                   Uuidm.pp uuid Builder.pp_script_job job);
-      let r, data = execute_job s uuid job in
-      Logs.debug (fun m -> m "executed job");
-      Builder.(write_cmd s (Job_finished (uuid, r, data)))
+      let rd, wr = Unix.pipe ~cloexec:false () in
+      let pid = Unix.fork () in
+      if pid = 0 then
+        let r, data = execute_job s uuid job in
+        let () = Marshal.to_channel (Unix.out_channel_of_descr wr) (r, data) [] in
+        exit 0
+      else
+        begin
+          match Unix.select [ rd; s ] [] [] Float.min_float with
+          | [x], [], [] when x = rd ->
+            let r, data = Marshal.from_channel (Unix.in_channel_of_descr rd) in
+            Builder.(write_cmd s (Job_finished (uuid, r, data)))
+          | rdset, [], [] when List.mem s rdset ->
+            let () = Logs.debug (fun m -> m "Timeout (probably)") in
+            let () = Unix.kill pid Sys.sigterm in
+            exit 0
+          | _ -> assert false
+        end
     | cmd ->
       Logs.err (fun m -> m "expected Job, got %a" Builder.pp_cmd cmd);
       Error (`Msg "bad communication")
