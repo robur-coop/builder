@@ -80,7 +80,7 @@ let execute_job s uuid job =
     end else (* parent *)
       let toexec = Fpath.(to_string (tmpdir / sh)) in
       let pid =
-        Unix.create_process "/bin/sh" [| "-e" ; toexec |] Unix.stdin out out
+        Unix.create_process "/bin/sh" [| "-ec" ; "timeout 1h " ^ toexec |] Unix.stdin out out
       in
       let r = Unix.waitpid [] pid in
       (try
