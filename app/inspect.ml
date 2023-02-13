@@ -10,12 +10,14 @@ let prepare_console out started now res =
   in
   started :: cons @ [ exited ; stopped ]
 
-let jump () file console script output =
+let jump () file console script output print_job =
   let ( let* ) = Result.bind in
   let* data = Bos.OS.File.read (Fpath.v file) in
   let* job, _uuid, out, started, now, res, data =
     Builder.Asn.exec_of_cs (Cstruct.of_string data)
   in
+  if print_job then
+    Logs.app (fun m -> m "%s on %s" job.Builder.name job.Builder.platform);
   if console then begin
     let lines = prepare_console out started now res in
     List.iter (fun l -> Logs.app (fun m -> m "%s" l)) lines
@@ -56,13 +58,17 @@ let output =
   let doc = "Output files into a directory" in
   Arg.(value & opt (some dir) None & info [ "output" ] ~doc ~docv:"DIR")
 
+let job =
+  let doc = "Print job information" in
+  Arg.(value & flag & info [ "job" ] ~doc)
+
 let file =
   let doc = "The file name to inspect" in
   Arg.(required & pos 0 (some file) None & info [ ] ~doc ~docv:"FILE")
 
 let cmd =
   let term =
-    Term.(term_result (const jump $ setup_log $ file $ console $ script $ output))
+    Term.(term_result (const jump $ setup_log $ file $ console $ script $ output $ job))
   and info = Cmd.info "builder-inspect" ~version:Builder.version
   in
   Cmd.v info term
