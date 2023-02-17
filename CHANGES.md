@@ -1,3 +1,10 @@
+# v0.3.2 (2023-02-17)
+
+* Worker: fix create_process (@hannesm)
+* Worker: timeout of 1 hour (#28 @hannesm)
+* Inspect: add flag to print job information (#31 @reynir)
+* Adapt to http-lwt-client 0.2.0 API (@hannesm)
+
 # v0.3.1 (2022-03-15)
 
 * Debian postinstall: create user/group conditionally, systemd daemon-reload
