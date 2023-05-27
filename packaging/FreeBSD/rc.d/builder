@@ -33,7 +33,7 @@ procname="/usr/local/libexec/builder-server"
 
 builder_start () {
     echo "Starting ${name}."
-    /usr/sbin/daemon -S -p "${pidfile}" -u "${builder_user}" \
+    /usr/sbin/daemon -S -r -P "${pidfile}" -u "${builder_user}" \
 		     "${procname}" ${builder_flags}
 }
 
