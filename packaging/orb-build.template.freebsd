@@ -4,5 +4,5 @@ set -ex
 
 fetch -o orb.pkg 'https://builds.robur.coop/job/orb/build/latest/f/bin/orb.pkg?platform=%%PLATFORM%%' && pkg install -y orb.pkg && rm orb.pkg
 
-repos="default:https://opam.ocaml.org,unikernels:https://git.robur.io/robur/unikernel-repo.git"
+repos="default:https://opam.ocaml.org,unikernels:https://git.robur.coop/robur/unikernel-repo.git"
 orb build --solver-timeout=600 --switch-name=/tmp/myswitch --date=1589138087 --out=. --repos=$repos %%OPAM_PACKAGE%%
