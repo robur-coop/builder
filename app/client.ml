@@ -39,8 +39,8 @@ let observe_uuid uuid remote =
   let rec read () =
     let* cmd = Builder.read_cmd s in
     match cmd with
-    | Output_timestamped _ ->
-      Logs.app (fun m -> m "%a" Builder.pp_cmd cmd);
+    | Output_timestamped (_uuid, ts, data) ->
+      Logs.app (fun m -> m "%a %s" Duration.pp ts data);
       read ()
     | _ ->
       if cmd <> Builder.Success then
