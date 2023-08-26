@@ -441,17 +441,19 @@ let worker_loop t addr fd =
     Lwt.return_unit
 
 let maybe_schedule_job t p j =
-  if S.fold (fun { Builder.job ; _ } acc ->
-    if acc then not (Builder.job_equal job j) else acc)
+  if
+    S.fold
+      (fun { Builder.job ; _ } acc ->
+         if acc then not (Builder.job_equal job j) else acc)
       t.schedule true
-    then
-      let now = Ptime_clock.now () in
-      schedule_job t now p j;
-      add_to_queues t j;
-      ignore (dump t);
-      Lwt.return (Ok ())
-    else
-      Lwt.return (Error (`Msg "job name already used"))
+  then
+    let now = Ptime_clock.now () in
+    schedule_job t now p j;
+    add_to_queues t j;
+    ignore (dump t);
+    Lwt.return (Ok ())
+  else
+    Lwt.return (Error (`Msg "job name already used"))
 
 let client_loop t fd =
   let open Lwt_result.Infix in
