@@ -109,13 +109,14 @@ let find_queue t p =
     q
 
 let p_to_span p =
-  let one_hour = 60 * 60 in
-  let s = match p with
-    | Builder.Hourly -> one_hour
-    | Builder.Daily -> 24 * one_hour
-    | Builder.Weekly -> 7 * 24 * one_hour
+  let one_hour = 60 * 60
+  and to_span = Ptime.Span.of_int_s
   in
-  Ptime.Span.of_int_s s
+  match p with
+  | Builder.Hourly -> to_span one_hour
+  | Builder.Daily -> to_span (24 * one_hour)
+  | Builder.Weekly -> to_span (7 * 24 * one_hour)
+  | Builder.Never -> Ptime.(to_span max)
 
 let add_to_queue t platform job =
   match SM.find_opt platform t.queues with
@@ -183,9 +184,11 @@ let add_to_queues t = function
     Lwt_condition.broadcast t.waiter ()
 
 let schedule_job t now period job =
-  match Ptime.add_span now (p_to_span period) with
-  | None -> Logs.err (fun m -> m "ptime add span failed when scheduling job")
-  | Some next -> S.add t.schedule Builder.{ next ; period ; job }
+  let next =
+    Option.value ~default:Ptime.max
+      (Ptime.add_span now (p_to_span period))
+  in
+  S.add t.schedule Builder.{ next ; period ; job }
 
 let schedule t =
   let now = Ptime_clock.now () in
