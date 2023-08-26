@@ -40,12 +40,13 @@ let pp_execution_result ppf = function
   | Stopped i -> Fmt.pf ppf "stopped %d" i
   | Msg m -> Fmt.pf ppf "execution aborted: %s" m
 
-type period = Hourly | Daily | Weekly
+type period = Hourly | Daily | Weekly | Never
 
 let pp_period ppf = function
   | Hourly -> Fmt.string ppf "hourly"
   | Daily -> Fmt.string ppf "daily"
   | Weekly -> Fmt.string ppf "weekly"
+  | Never -> Fmt.string ppf "never"
 
 type job =
   | Script_job of script_job
@@ -238,13 +239,15 @@ module Asn = struct
       | `C1 () -> Hourly
       | `C2 () -> Daily
       | `C3 () -> Weekly
+      | `C4 () -> Never
     and g = function
       | Hourly -> `C1 ()
       | Daily -> `C2 ()
       | Weekly -> `C3 ()
+      | Never -> `C4 ()
     in
     Asn.S.(map f g
-             (choice3 (explicit 0 null) (explicit 1 null) (explicit 2 null)))
+             (choice4 (explicit 0 null) (explicit 1 null) (explicit 2 null) (explicit 3 null)))
 
   let old_schedule =
     let f (next, period, job) = {next; period; job = Script_job job}
