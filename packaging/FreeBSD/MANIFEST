@@ -2,7 +2,7 @@ name:         builder
 version:      %%VERSION_NUM%%
 origin:	      local/builder
 comment:      Builder service
-www:	      https://github.com/roburio/builder
+www:	      https://github.com/robur-coop/builder
 maintainer:   Robur <team@robur.coop>
 prefix:	      /usr/local
 licenselogic: single
