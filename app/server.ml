@@ -195,7 +195,7 @@ let schedule t =
   let rec s_next modified =
     match S.minimum t.schedule with
     | exception Binary_heap.Empty -> modified
-    | Builder.{ next ; period ; job } when Ptime.is_later ~than:next now ->
+    | Builder.{ next ; period ; job } when Ptime.is_later ~than:next now && period <> Never ->
       S.remove t.schedule;
       schedule_job t now period job;
       add_to_queues t job;
@@ -503,7 +503,7 @@ let client_loop t fd =
     Result.fold r
       ~ok:(fun () ->
         ignore (dump t);
-        Lwt_condition.broadcast t.waiter (); 
+        Lwt_condition.broadcast t.waiter ();
         Lwt.return (Ok ()))
       ~error:(fun (`Msg m) ->
         Lwt.return (Error (`Msg ("execute failed: " ^ m))))
