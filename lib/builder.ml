@@ -249,6 +249,21 @@ module Asn = struct
     Asn.S.(map f g
              (choice4 (explicit 0 null) (explicit 1 null) (explicit 2 null) (explicit 3 null)))
 
+  let next =
+    let min_utc_time = Ptime.of_date_time ((1950, 1, 1), ((0, 0, 0), 0)) in
+    let f p =
+      if Ptime.equal p min_utc_time then
+        Ptime.max
+      else
+        p
+    and g p =
+      if Ptime.equal p Ptime.max then
+        min_utc_time
+      else
+        p
+    in
+    Asn.S.(map f g utc_time)
+
   let old_schedule =
     let f (next, period, job) = {next; period; job = Script_job job}
     and g _ = assert false
@@ -263,7 +278,7 @@ module Asn = struct
     and g {next; period; job} = (next, period, job)
     in
     Asn.S.(map f g (sequence3
-                      (required ~label:"next" utc_time)
+                      (required ~label:"next" next)
                       (required ~label:"period" period)
                       (required ~label:"job" job)))
 
@@ -457,7 +472,7 @@ module Asn = struct
                      (required ~label:"orb_build_job" orb_build_job)))
                    (explicit 13 (sequence3
                      (required ~label:"name" utf8_string)
-                     (required ~label:"next" utc_time)
+                     (required ~label:"next" next)
                      (optional ~label:"period" period)))
                    (explicit 14 (sequence2
                      (required ~label:"typ" client_or_worker)
