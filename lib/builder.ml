@@ -259,11 +259,14 @@ module Asn = struct
                       (required ~label:"job" script_job)))
 
   let schedule =
-    let f (next, period, job) = {next; period; job}
-    and g {next; period; job} = (next, period, job)
+    let f (next, period, job) =
+      let next = match next with `C1 n | `C2 n -> n in
+      {next; period; job}
+    and g {next; period; job} = (`C2 next, period, job)
     in
     Asn.S.(map f g (sequence3
-                      (required ~label:"next" utc_time)
+                      (required ~label:"next"
+                         (choice2 utc_time generalized_time))
                       (required ~label:"period" period)
                       (required ~label:"job" job)))
 
@@ -327,10 +330,13 @@ module Asn = struct
   let exec =
     let f = function
       | `C1 (job, uuid, out, (created, finished), res, data) ->
+        let created = match created with `C1 n | `C2 n -> n
+        and finished = match finished with `C1 n | `C2 n -> n
+        in
         job, uuid, out, created, finished, res, data
       | `C2 () -> assert false
     and g (job, uuid, out, created, finished, res, data) =
-      `C1 (job, uuid, out, (created, finished), res, data)
+      `C1 (job, uuid, out, (`C2 created, `C2 finished), res, data)
     in
     Asn.S.(map f g
              (choice2
@@ -344,8 +350,10 @@ module Asn = struct
                                          (required ~label:"data" utf8_string))))
                       (required ~label:"timestamps"
                          (sequence2
-                            (required ~label:"started" utc_time)
-                            (required ~label:"finished" utc_time)))
+                            (required ~label:"started"
+                               (choice2 utc_time generalized_time))
+                            (required ~label:"finished"
+                               (choice2 utc_time generalized_time))))
                       (required ~label:"result" res)
                       (required ~label:"output" data)))
                 (explicit 1 null)))
@@ -378,13 +386,21 @@ module Asn = struct
       | `C1 `C6 (period, job) -> Schedule (period, job)
       | `C2 `C1 () -> Info
       | `C2 `C2 (schedule, queues, running) ->
+        let running =
+          List.map (fun (started, uuid, job) ->
+              let started = match started with `C1 n | `C2 n -> n in
+              started, uuid, job)
+            running
+        in
         Info_reply { schedule ; queues ; running }
       | `C2 `C3 () -> assert false
       | `C2 `C4 jn -> Unschedule jn
       | `C2 `C5 id -> Observe id
       | `C2 `C6 jn -> Execute (jn, None)
       | `C3 `C1 (period, orb_job) -> Schedule_orb_build (period, orb_job)
-      | `C3 `C2 (name, next, period) -> Reschedule (name, next, period)
+      | `C3 `C2 (name, next, period) ->
+        let next = match next with `C1 n | `C2 n -> n in
+        Reschedule (name, next, period)
       | `C3 `C3 (t, n) -> Client_hello (t, n)
       | `C3 `C4 () -> Server_hello
       | `C3 `C5 platform -> Job_requested platform
@@ -400,11 +416,14 @@ module Asn = struct
       | Schedule (period, job) -> `C1 (`C6 (period, job))
       | Info -> `C2 (`C1 ())
       | Info_reply { schedule ; queues ; running } ->
+        let running =
+          List.map (fun (started, uuid, job) -> `C2 started, uuid, job) running
+        in
         `C2 (`C2 (schedule, queues, running))
       | Unschedule jn -> `C2 (`C4 jn)
       | Observe id -> `C2 (`C5 id)
       | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
-      | Reschedule (name, next, period) -> `C3 (`C2 (name, next, period))
+      | Reschedule (name, next, period) -> `C3 (`C2 (name, `C2 next, period))
       | Client_hello (t, n) -> `C3 (`C3 (t, n))
       | Server_hello -> `C3 (`C4 ())
       | Job_requested platform -> `C3 (`C5 platform)
@@ -444,7 +463,8 @@ module Asn = struct
                                   (required ~label:"running"
                                      (sequence_of
                                         (sequence3
-                                           (required ~label:"started" utc_time)
+                                           (required ~label:"started"
+                                              (choice2 utc_time generalized_time))
                                            (required ~label:"uuid" uuid)
                                            (required ~label:"job" script_job))))))
                    (explicit 8 null)
@@ -457,7 +477,7 @@ module Asn = struct
                      (required ~label:"orb_build_job" orb_build_job)))
                    (explicit 13 (sequence3
                      (required ~label:"name" utf8_string)
-                     (required ~label:"next" utc_time)
+                     (required ~label:"next" (choice2 utc_time generalized_time))
                      (optional ~label:"period" period)))
                    (explicit 14 (sequence2
                      (required ~label:"typ" client_or_worker)
