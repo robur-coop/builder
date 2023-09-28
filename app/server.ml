@@ -109,13 +109,14 @@ let find_queue t p =
     q
 
 let p_to_span p =
-  let one_hour = 60 * 60 in
-  let s = match p with
-    | Builder.Hourly -> one_hour
-    | Builder.Daily -> 24 * one_hour
-    | Builder.Weekly -> 7 * 24 * one_hour
+  let one_hour = 60 * 60
+  and to_span = Ptime.Span.of_int_s
   in
-  Ptime.Span.of_int_s s
+  match p with
+  | Builder.Hourly -> to_span one_hour
+  | Builder.Daily -> to_span (24 * one_hour)
+  | Builder.Weekly -> to_span (7 * 24 * one_hour)
+  | Builder.Never -> Ptime.(to_span max)
 
 let add_to_queue t platform job =
   match SM.find_opt platform t.queues with
@@ -183,16 +184,18 @@ let add_to_queues t = function
     Lwt_condition.broadcast t.waiter ()
 
 let schedule_job t now period job =
-  match Ptime.add_span now (p_to_span period) with
-  | None -> Logs.err (fun m -> m "ptime add span failed when scheduling job")
-  | Some next -> S.add t.schedule Builder.{ next ; period ; job }
+  let next =
+    Option.value ~default:Ptime.max
+      (Ptime.add_span now (p_to_span period))
+  in
+  S.add t.schedule Builder.{ next ; period ; job }
 
 let schedule t =
   let now = Ptime_clock.now () in
   let rec s_next modified =
     match S.minimum t.schedule with
     | exception Binary_heap.Empty -> modified
-    | Builder.{ next ; period ; job } when Ptime.is_later ~than:next now ->
+    | Builder.{ next ; period ; job } when Ptime.is_later ~than:next now && period <> Never ->
       S.remove t.schedule;
       schedule_job t now period job;
       add_to_queues t job;
@@ -438,17 +441,19 @@ let worker_loop t addr fd =
     Lwt.return_unit
 
 let maybe_schedule_job t p j =
-  if S.fold (fun { Builder.job ; _ } acc ->
-    if acc then not (Builder.job_equal job j) else acc)
+  if
+    S.fold
+      (fun { Builder.job ; _ } acc ->
+         if acc then not (Builder.job_equal job j) else acc)
       t.schedule true
-    then
-      let now = Ptime_clock.now () in
-      schedule_job t now p j;
-      add_to_queues t j;
-      ignore (dump t);
-      Lwt.return (Ok ())
-    else
-      Lwt.return (Error (`Msg "job name already used"))
+  then
+    let now = Ptime_clock.now () in
+    schedule_job t now p j;
+    add_to_queues t j;
+    ignore (dump t);
+    Lwt.return (Ok ())
+  else
+    Lwt.return (Error (`Msg "job name already used"))
 
 let client_loop t fd =
   let open Lwt_result.Infix in
@@ -498,7 +503,7 @@ let client_loop t fd =
     Result.fold r
       ~ok:(fun () ->
         ignore (dump t);
-        Lwt_condition.broadcast t.waiter (); 
+        Lwt_condition.broadcast t.waiter ();
         Lwt.return (Ok ()))
       ~error:(fun (`Msg m) ->
         Lwt.return (Error (`Msg ("execute failed: " ^ m))))

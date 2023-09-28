@@ -174,6 +174,7 @@ let p =
     "hourly", Builder.Hourly ;
     "daily", Builder.Daily ;
     "weekly", Builder.Weekly ;
+    "never", Builder.Never ;
   ]
 
 let period =
