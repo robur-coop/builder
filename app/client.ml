@@ -169,20 +169,22 @@ let id =
   let doc = "The job ID" in
   Arg.(required & pos 0 (some string) None & info [ ] ~doc ~docv:"ID")
 
-let p =
-  Arg.enum [
+let p, p_doc =
+  let enum = [
     "hourly", Builder.Hourly ;
     "daily", Builder.Daily ;
     "weekly", Builder.Weekly ;
     "never", Builder.Never ;
   ]
+  in
+  Arg.enum enum, Arg.doc_alts_enum enum
 
 let period =
-  let doc = "The periodic execution interval" in
+  let doc = Fmt.str "The periodic execution interval. Must be %s." p_doc in
   Arg.(value & opt p Builder.Daily & info [ "period" ] ~doc ~docv:"PERIOD")
 
 let period_opt =
-  let doc = "The periodic execution interval" in
+  let doc = Fmt.str "The periodic execution interval. Must be %s." p_doc in
   Arg.(value & opt (some p) None & info [ "period" ] ~doc ~docv:"PERIOD")
 
 let next =
