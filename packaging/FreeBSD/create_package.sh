@@ -25,6 +25,7 @@ mkdir -p "$sbindir" "$libexecdir" "$rcdir" "$confdir"
 
 # stage service scripts
 install -U $pdir/rc.d/builder $rcdir/builder
+install -U $pdir/rc.d/builder_worker $rcdir/builder_worker
 
 # stage templates
 install -U $pdir/../orb-build.template.freebsd $confdir/orb-build.template.freebsd
@@ -37,6 +38,7 @@ install -U $basedir/FreeBSD/load.sh $confdir/load.sh
 # stage app binaries
 install -U $bdir/builder-server $libexecdir/builder-server
 install -U $bdir/builder-worker $libexecdir/builder-worker
+install -U $basedir/FreeBSD/load.sh $libexecdir/builder_worker.sh
 
 install -U $bdir/builder-client $sbindir/builder-client
 install -U $bdir/builder-inspect $sbindir/builder-inspect

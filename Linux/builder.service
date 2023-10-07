@@ -1,5 +1,6 @@
 [Unit]
 Description=Builder daemon
+# You may need to add "docker.service" if you specify a IP setup by docker below
 After=syslog.target network.target
 
 [Service]

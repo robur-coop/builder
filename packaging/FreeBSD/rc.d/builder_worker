@@ -1,0 +1,69 @@
+#!/bin/sh
+
+# $FreeBSD$
+#
+# PROVIDE: builder_worker
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+# Define these builder_worker* variables in one of these files
+# 	 /etc/rc.conf
+#	 /etc/rc.conf.local
+#	 /etc/rc.conf.d/builder_worker
+#	 /usr/local/etc/rc.conf.d/builder_worker
+#
+# builder_worker_flags:
+#                       Default: ""
+#
+
+. /etc/rc.subr
+
+name=builder_worker
+rcvar=${name}_enable
+desc="Builder worker service"
+load_rc_config $name
+start_cmd="builder_worker_start"
+start_precmd="builder_worker_precmd"
+
+: ${builder_worker_enable:="NO"}
+: ${builder_worker_flags:="build orba"}
+
+pidfile="/var/run/builder_worker.pid"
+procname="/usr/local/libexec/builder_worker.sh"
+
+#
+# force_depend script [rcvar]
+#	Force a service to start. Intended for use by services
+#	to resolve dependency issues.
+#	$1 - filename of script, in /usr/local/etc/rc.d, to run
+#	$2 - name of the script's rcvar (minus the _enable)
+#
+my_force_depend()
+{
+	local _depend _dep_rcvar
+
+	_depend="$1"
+	_dep_rcvar="${2:-$1}_enable"
+
+	[ -n "$rc_fast" ] && ! checkyesno always_force_depends &&
+	    checkyesno $_dep_rcvar && return 0
+
+	/usr/local/etc/rc.d/${_depend} forcestatus >/dev/null 2>&1 && return 0
+
+	info "${name} depends on ${_depend}, which will be forced to start."
+	if ! /usr/local/etc/rc.d/${_depend} forcestart; then
+		warn "Unable to force ${_depend}. It may already be running."
+		return 1
+	fi
+}
+
+builder_worker_precmd() {
+    my_force_depend builder || err 1 "Cannot run builder"
+}
+
+builder_worker_start () {
+    echo "Starting ${name}."
+    /usr/sbin/daemon -S -r -P "${pidfile}" "${procname}" ${builder_worker_flags}
+}
+
+run_rc_command "$1"

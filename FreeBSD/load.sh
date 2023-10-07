@@ -1,6 +1,6 @@
 #!/bin/sh
 
-: ${JAILCONF="jail.conf"}
+: ${JAILCONF="/usr/local/etc/builder/jail.conf"}
 : ${POOL=$(zpool list -H -o name | head -1)}
 : ${SNAPSHOT=${POOL}/poudriere/jails/13-0-release@clean}
 
