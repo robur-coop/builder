@@ -32,8 +32,7 @@ install -U $pdir/../orb-build.template.freebsd $confdir/orb-build.template.freeb
 install -U $pdir/../orb-build.template.ubuntu-20.04 $confdir/orb-build.template.ubuntu-20.04
 
 # jail conf and scripts
-install -U $basedir/FreeBSD/jail.conf $confdir/jail.conf
-install -U $basedir/FreeBSD/load.sh $confdir/load.sh
+install -U $basedir/FreeBSD/jail.conf $confdir/jail.conf.sample
 
 # stage app binaries
 install -U $bdir/builder-server $libexecdir/builder-server

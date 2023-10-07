@@ -44,10 +44,11 @@ jail snapshots via: `poudriere jail -c -j 13-0-REL -m ftp-archive -v 13.0-RELEAS
 where the argument `-j` is the jailname, and `-v` describes the version to
 download (NB: look into `man poudriere-jail` for further options).
 
-A jail.conf and a shell-script to launch a jail are provided in the FreeBSD
-subdirectory of this repository. Adjust the exec.start in jail.conf (and other
-paths, such as path) if appropriate. In load.sh, adapt the zpool and zfs
-snapshot source name.
+A `jail.conf` and a shell script (`load.sh` installed as `builder_worker.sh`) to
+launch a jail are provided in the FreeBSD subdirectory of this repository.
+Rename `jail.conf.sample` and adjust the exec.start in `jail.conf` (and other
+paths, such as path) if appropriate. In `builder_worker.sh`, adapt the zpool
+and zfs snapshot source name.
 
 Before starting your jails, they'll need an Internet connection for downloading
 and installing packages, e.g. /etc/pf.conf:
