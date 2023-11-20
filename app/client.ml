@@ -123,7 +123,16 @@ let reschedule () remote name next period =
 let drop_platform () remote name =
   let* s = connect remote in
   let* () = Builder.write_cmd s (Builder.Drop_platform name) in
-  teardown s
+  let r = teardown s in
+  Result.iter
+    (fun () ->
+       Logs.app (fun m -> m "Platform %s dropped. \
+                             Remember to disable workers for that platform. \
+                             Workers for %s still running will recreate \
+                             the platform."
+                    name))
+    r;
+  r
 
 let help () man_format cmds = function
   | None -> `Help (`Pager, None)
@@ -283,7 +292,7 @@ let execute_cmd =
 
 let drop_platform_cmd =
   let platform =
-    let doc = "The platform to drop" in
+    let doc = "The platform to drop. Remember to disable relevant workers as well." in
     Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
   in
   let term =
