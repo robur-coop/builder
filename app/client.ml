@@ -130,7 +130,7 @@ let drop_platform () remote name =
                              Remember to disable workers for that platform. \
                              Workers for %s still running will recreate \
                              the platform."
-                    name))
+                    name name))
     r;
   r
 

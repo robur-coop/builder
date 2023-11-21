@@ -71,6 +71,7 @@ let dummy =
   Builder.{ next = Ptime.epoch ; period = Daily ; job }
 
 module SM = Map.Make(String)
+module SSet = Set.Make(String)
 
 type output_data = [ `Data of int64 * string | `End of int64 * string ]
 
@@ -78,6 +79,7 @@ type t = {
   mutable queues : Builder.job Queue.t SM.t ;
   mutable schedule : S.t ;
   mutable running : (Ptime.t * Builder.script_job * output_data Lwt_condition.t * (int64 * string) list) UM.t ;
+  mutable dropped_platforms : SSet.t;
   waiter : [`New_job | `Platform_removed of string] Lwt_condition.t ;
   dbdir : Fpath.t ;
   upload : string option ;
@@ -96,12 +98,13 @@ let find_queue t p =
   | None ->
     let template_present = template_exists t.cfgdir p in
     let q = Queue.create () in
-    S.iter (fun { job ; _ } ->
-      match Builder.job_platform job with
-      | Some plat when String.equal plat p -> Queue.add job q
-      | None when template_present -> Queue.add job q
-      | _ -> ())
-      t.schedule;
+    if not (SSet.mem p t.dropped_platforms) then
+      S.iter (fun { job ; _ } ->
+          match Builder.job_platform job with
+          | Some plat when String.equal plat p -> Queue.add job q
+          | None when template_present -> Queue.add job q
+          | _ -> ())
+        t.schedule;
     if not (Queue.is_empty q) then begin
       t.queues <- SM.add p q t.queues;
       Lwt_condition.broadcast t.waiter `New_job;
@@ -213,7 +216,13 @@ let dump, restore =
            Builder.Queue (platform, Queue.to_seq q |> List.of_seq) :: acc)
            t.queues []
        in
-       S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule queues
+       let and_schedules =
+         S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule queues
+       in
+       SSet.fold (fun platform acc ->
+           (Builder.Dropped_platform platform) :: acc)
+         t.dropped_platforms
+         and_schedules
      in
      let data = Builder.Asn.state_to_cs state in
      let bak = Fpath.(t.dbdir / file + "tmp") in
@@ -224,27 +233,31 @@ let dump, restore =
      let to_read = Fpath.(dbdir / file) in
      let queues = SM.empty
      and schedule = S.create ~dummy 13
+     and dropped_platforms = SSet.empty
      and waiter = Lwt_condition.create ()
      and he = Happy_eyeballs_lwt.create ()
      in
      let* t_r_exists = Bos.OS.File.exists to_read in
      if not t_r_exists then begin
        Logs.warn (fun m -> m "state file does not exist, using empty");
-       Ok { queues ; schedule ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir }
+       Ok { queues ; schedule ; dropped_platforms ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir }
      end else
        let* data = Bos.OS.File.read to_read in
        let* items = Builder.Asn.state_of_cs (Cstruct.of_string data) in
-       let queues, schedule =
-         List.fold_left (fun (queues, schedule) -> function
+       let queues, schedule, dropped_platforms =
+         List.fold_left (fun (queues, schedule, dropped_platforms) -> function
              | Builder.Queue (platform, jobs) ->
                let q = List.to_seq jobs |> Queue.of_seq in
-               (SM.add platform q queues, schedule)
+               (SM.add platform q queues, schedule, dropped_platforms)
              | Builder.Schedule s ->
                S.add schedule s;
-               (queues, schedule))
-           (queues, schedule) items
+               (queues, schedule, dropped_platforms)
+             | Builder.Dropped_platform platform ->
+               let dropped_platforms = SSet.add platform dropped_platforms in
+               (queues, schedule, dropped_platforms))
+           (queues, schedule, dropped_platforms) items
        in
-       Ok { queues ; schedule ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir })
+       Ok { queues ; schedule ; dropped_platforms ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir })
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
@@ -351,6 +364,7 @@ let worker_loop t addr fd =
           if String.equal p platform then
             Logs.warn (fun m -> m "Platform %s removed; remember to shut down worker at %a"
                           platform pp_sockaddr addr);
+          (* FIXME: wait forever-ish *)
           Lwt_condition.wait t.waiter >>= find_job
         | `New_job ->
           let queue = find_queue t platform in
@@ -361,7 +375,7 @@ let worker_loop t addr fd =
             Lwt_condition.wait t.waiter >>= find_job
           | Some job -> Lwt.return job
       in
-      Lwt_condition.wait t.waiter >>= find_job >>= fun job ->
+      find_job `New_job >>= fun job ->
       ignore (dump t);
       let uuid = uuid_gen () in
       let put_back_on_err f =
@@ -464,6 +478,8 @@ let maybe_schedule_job t p j =
 let client_loop t fd =
   let open Lwt_result.Infix in
   read_cmd fd >>= function
+  | Builder.Schedule (_, {platform; _}) when SSet.mem platform t.dropped_platforms ->
+    Lwt.return (Error (`Msg "platform dropped; can't schedule jobs"))
   | Builder.Schedule (p, j) ->
     Logs.app (fun m -> m "%a schedule %a" Builder.pp_period p
                  Builder.pp_script_job j);
@@ -561,10 +577,16 @@ let client_loop t fd =
   | Builder.Drop_platform p ->
     if SM.mem p t.queues then begin
       t.queues <- SM.remove p t.queues;
+      t.dropped_platforms <- SSet.add p t.dropped_platforms;
       Lwt_condition.broadcast t.waiter (`Platform_removed p);
       Lwt.return (Ok ())
     end else
       Lwt.return (Error (`Msg ("unknown platform " ^ p)))
+  | Builder.Undrop_platform p ->
+    (* XXX: error if not dropped? *)
+    t.dropped_platforms <- SSet.remove p t.dropped_platforms;
+    Lwt_condition.broadcast t.waiter `New_job;
+    Lwt.return (Ok ())
   | cmd ->
     Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
     Lwt_result.lift (Error (`Msg "bad communication"))
