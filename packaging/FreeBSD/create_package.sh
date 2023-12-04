@@ -27,12 +27,12 @@ mkdir -p "$sbindir" "$libexecdir" "$rcdir" "$confdir"
 install -U $pdir/rc.d/builder $rcdir/builder
 
 # stage templates
-install -U $pdir/../orb-build.template.freebsd $confdir/orb-build.template.freebsd
-install -U $pdir/../orb-build.template.ubuntu-20.04 $confdir/orb-build.template.ubuntu-20.04
+install -U $pdir/../orb-build.template.freebsd $confdir/orb-build.template.freebsd.sample
+install -U $pdir/../orb-build.template.ubuntu-20.04 $confdir/orb-build.template.ubuntu-20.04.sample
 
 # jail conf and scripts
-install -U $basedir/FreeBSD/jail.conf $confdir/jail.conf
-install -U $basedir/FreeBSD/load.sh $confdir/load.sh
+install -U $basedir/FreeBSD/jail.conf $confdir/jail.conf.sample
+install -U $basedir/FreeBSD/load.sh $confdir/load.sh.sample
 
 # stage app binaries
 install -U $bdir/builder-server $libexecdir/builder-server
