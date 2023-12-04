@@ -71,6 +71,7 @@ let dummy =
   Builder.{ next = Ptime.epoch ; period = Daily ; job }
 
 module SM = Map.Make(String)
+module SSet = Set.Make(String)
 
 type output_data = [ `Data of int64 * string | `End of int64 * string ]
 
@@ -78,7 +79,8 @@ type t = {
   mutable queues : Builder.job Queue.t SM.t ;
   mutable schedule : S.t ;
   mutable running : (Ptime.t * Builder.script_job * output_data Lwt_condition.t * (int64 * string) list) UM.t ;
-  waiter : unit Lwt_condition.t ;
+  mutable dropped_platforms : SSet.t;
+  waiter : [`New_job | `Platform_removed of string] Lwt_condition.t ;
   dbdir : Fpath.t ;
   upload : string option ;
   he : Happy_eyeballs_lwt.t ;
@@ -96,15 +98,16 @@ let find_queue t p =
   | None ->
     let template_present = template_exists t.cfgdir p in
     let q = Queue.create () in
-    S.iter (fun { job ; _ } ->
-      match Builder.job_platform job with
-      | Some plat when String.equal plat p -> Queue.add job q
-      | None when template_present -> Queue.add job q
-      | _ -> ())
-      t.schedule;
+    if not (SSet.mem p t.dropped_platforms) then
+      S.iter (fun { job ; _ } ->
+          match Builder.job_platform job with
+          | Some plat when String.equal plat p -> Queue.add job q
+          | None when template_present -> Queue.add job q
+          | _ -> ())
+        t.schedule;
     if not (Queue.is_empty q) then begin
       t.queues <- SM.add p q t.queues;
-      Lwt_condition.broadcast t.waiter ();
+      Lwt_condition.broadcast t.waiter `New_job;
     end;
     q
 
@@ -125,7 +128,7 @@ let add_to_queue t platform job =
         if acc then not (Builder.job_equal i job) else acc)
         true q
     then Queue.add job q;
-    Lwt_condition.broadcast t.waiter ()
+    Lwt_condition.broadcast t.waiter `New_job
   | None -> ()
 
 let move_to_front q q' j =
@@ -177,11 +180,11 @@ let add_to_queues t = function
     SM.iter (fun _ q ->
       if not (queue_contains job q) then Queue.add job q)
       t.queues;
-    Lwt_condition.broadcast t.waiter ()
+    Lwt_condition.broadcast t.waiter `New_job
   | Builder.Script_job { platform ; _ } as job ->
     let q = find_queue t platform in
     if not (queue_contains job q) then Queue.add job q;
-    Lwt_condition.broadcast t.waiter ()
+    Lwt_condition.broadcast t.waiter `New_job
 
 let schedule_job t now period job =
   let next =
@@ -213,7 +216,13 @@ let dump, restore =
            Builder.Queue (platform, Queue.to_seq q |> List.of_seq) :: acc)
            t.queues []
        in
-       S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule queues
+       let and_schedules =
+         S.fold (fun s acc -> (Builder.Schedule s) :: acc) t.schedule queues
+       in
+       SSet.fold (fun platform acc ->
+           (Builder.Dropped_platform platform) :: acc)
+         t.dropped_platforms
+         and_schedules
      in
      let data = Builder.Asn.state_to_cs state in
      let bak = Fpath.(t.dbdir / file + "tmp") in
@@ -224,27 +233,31 @@ let dump, restore =
      let to_read = Fpath.(dbdir / file) in
      let queues = SM.empty
      and schedule = S.create ~dummy 13
+     and dropped_platforms = SSet.empty
      and waiter = Lwt_condition.create ()
      and he = Happy_eyeballs_lwt.create ()
      in
      let* t_r_exists = Bos.OS.File.exists to_read in
      if not t_r_exists then begin
        Logs.warn (fun m -> m "state file does not exist, using empty");
-       Ok { queues ; schedule ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir }
+       Ok { queues ; schedule ; dropped_platforms ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir }
      end else
        let* data = Bos.OS.File.read to_read in
        let* items = Builder.Asn.state_of_cs (Cstruct.of_string data) in
-       let queues, schedule =
-         List.fold_left (fun (queues, schedule) -> function
+       let queues, schedule, dropped_platforms =
+         List.fold_left (fun (queues, schedule, dropped_platforms) -> function
              | Builder.Queue (platform, jobs) ->
                let q = List.to_seq jobs |> Queue.of_seq in
-               (SM.add platform q queues, schedule)
+               (SM.add platform q queues, schedule, dropped_platforms)
              | Builder.Schedule s ->
                S.add schedule s;
-               (queues, schedule))
-           (queues, schedule) items
+               (queues, schedule, dropped_platforms)
+             | Builder.Dropped_platform platform ->
+               let dropped_platforms = SSet.add platform dropped_platforms in
+               (queues, schedule, dropped_platforms))
+           (queues, schedule, dropped_platforms) items
        in
-       Ok { queues ; schedule ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir })
+       Ok { queues ; schedule ; dropped_platforms ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir })
 
 let uuid_gen = Uuidm.v4_gen (Random.State.make_self_init ())
 
@@ -346,16 +359,23 @@ let worker_loop t addr fd =
   | Ok Builder.Job_requested platform ->
     begin
       Logs.app (fun m -> m "job requested for %S" platform);
-      let rec find_job () =
-        let queue = find_queue t platform in
-        match Queue.take_opt queue with
-        | None ->
-          if not (template_exists t.cfgdir platform) then
-            Logs.warn (fun m -> m "no template for %S" platform);
+      let rec find_job = function
+        | `Platform_removed p ->
+          if String.equal p platform then
+            Logs.warn (fun m -> m "Platform %s removed; remember to shut down worker at %a"
+                          platform pp_sockaddr addr);
+          (* FIXME: wait forever-ish *)
           Lwt_condition.wait t.waiter >>= find_job
-        | Some job -> Lwt.return job
+        | `New_job ->
+          let queue = find_queue t platform in
+          match Queue.take_opt queue with
+          | None ->
+            if not (template_exists t.cfgdir platform) then
+              Logs.warn (fun m -> m "no template for %S" platform);
+            Lwt_condition.wait t.waiter >>= find_job
+          | Some job -> Lwt.return job
       in
-      find_job () >>= fun job ->
+      find_job `New_job >>= fun job ->
       ignore (dump t);
       let uuid = uuid_gen () in
       let put_back_on_err f =
@@ -458,6 +478,8 @@ let maybe_schedule_job t p j =
 let client_loop t fd =
   let open Lwt_result.Infix in
   read_cmd fd >>= function
+  | Builder.Schedule (_, {platform; _}) when SSet.mem platform t.dropped_platforms ->
+    Lwt.return (Error (`Msg "platform dropped; can't schedule jobs"))
   | Builder.Schedule (p, j) ->
     Logs.app (fun m -> m "%a schedule %a" Builder.pp_period p
                  Builder.pp_script_job j);
@@ -503,7 +525,7 @@ let client_loop t fd =
     Result.fold r
       ~ok:(fun () ->
         ignore (dump t);
-        Lwt_condition.broadcast t.waiter ();
+        Lwt_condition.broadcast t.waiter `New_job;
         Lwt.return (Ok ()))
       ~error:(fun (`Msg m) ->
         Lwt.return (Error (`Msg ("execute failed: " ^ m))))
@@ -528,7 +550,7 @@ let client_loop t fd =
             (started, uuid, job) :: acc)
           t.running []
       in
-      Builder.{ schedule ; queues ; running }
+      Builder.{ schedule ; queues ; running ; dropped_platforms = SSet.elements t.dropped_platforms }
     in
     write_cmd fd (Builder.Info_reply reply)
   | Builder.Observe id ->
@@ -555,6 +577,24 @@ let client_loop t fd =
   | Builder.Drop_platform p ->
     if SM.mem p t.queues then begin
       t.queues <- SM.remove p t.queues;
+      t.dropped_platforms <- SSet.add p t.dropped_platforms;
+      let s = S.create ~dummy 13 in
+      S.iter (fun ({ job ; _ } as si) ->
+        match Builder.job_platform job with
+        | Some plat when String.equal plat p -> ()
+        | _ -> S.add s si)
+      t.schedule;
+      t.schedule <- s;
+      ignore (dump t);
+      Lwt_condition.broadcast t.waiter (`Platform_removed p);
+      Lwt.return (Ok ())
+    end else
+      Lwt.return (Error (`Msg ("unknown platform " ^ p)))
+  | Builder.Undrop_platform p ->
+    if SSet.mem p t.dropped_platforms then begin
+      t.dropped_platforms <- SSet.remove p t.dropped_platforms;
+      ignore (dump t);
+      Lwt_condition.broadcast t.waiter `New_job;
       Lwt.return (Ok ())
     end else
       Lwt.return (Error (`Msg ("unknown platform " ^ p)))

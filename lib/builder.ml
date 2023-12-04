@@ -82,15 +82,17 @@ type info = {
   schedule : schedule_item list ;
   queues : (string * job list) list ;
   running : (Ptime.t * Uuidm.t * script_job) list ;
+  dropped_platforms : string list ;
 }
 
 let triple ~sep pc pb pa ppf (va, vb, vc)=
   Fmt.pair ~sep pc (Fmt.pair ~sep pb pa) ppf
     (vc, (vb, va))
 
-let pp_info ppf { schedule ; queues ; running } =
+let pp_info ppf { schedule ; queues ; running ; dropped_platforms } =
   let pp_time = Ptime.pp_rfc3339 () in
-  Fmt.pf ppf "schedule:@.%a@.queues: %a@.running:@.%a@."
+  Fmt.pf ppf "dropped platforms: %a@.schedule:@.%a@.queues:@.%a@.running:@.%a@."
+    Fmt.(list ~sep:(any "@ ") string) dropped_platforms
     Fmt.(list ~sep:(any ";@.") pp_schedule_item) schedule
     Fmt.(list ~sep:(any "@.")
       (pair ~sep:(any ":@ ") string (list ~sep:(any ";@ ") pp_job))) queues
@@ -112,12 +114,13 @@ type cmd =
   | Schedule_orb_build of period * orb_build_job (* client *)
   | Reschedule of string * Ptime.t * period option (* client *)
   | Drop_platform of string (* client *)
+  | Undrop_platform of string (* client *)
   | Client_hello of [ `Client | `Worker ] * int
   | Server_hello
   | Success (* client *)
   | Failure of string (* client *)
 
-let client_version = 12
+let client_version = 13
 let worker_version = 5
 
 let version =
@@ -137,7 +140,7 @@ let pp_cmd ppf = function
     Fmt.pf ppf "schedule at %a: %a" pp_period period pp_script_job job
   | Unschedule job_name -> Fmt.pf ppf "unschedule %s" job_name
   | Info -> Fmt.string ppf "info"
-  | Info_reply info -> Fmt.pf ppf "info: %a" pp_info info
+  | Info_reply info -> Fmt.pf ppf "info:@.%a" pp_info info
   | Observe id -> Fmt.pf ppf "observe %a" Uuidm.pp id
   | Execute (name, platform) ->
     Fmt.pf ppf "execute %s on %a" name Fmt.(option ~none:(any "any platform") string) platform
@@ -149,6 +152,8 @@ let pp_cmd ppf = function
     Fmt.pf ppf "reschedule %s at %a: %a" name pp_period period (Ptime.pp_rfc3339 ()) next
   | Drop_platform platform ->
     Fmt.pf ppf "drop platform %s" platform
+  | Undrop_platform platform ->
+    Fmt.pf ppf "undrop platform %s" platform
   | Client_hello (t, num) ->
     Fmt.pf ppf "client hello %s %d"
       (match t with `Client -> "client" | `Worker -> "worker") num
@@ -159,12 +164,15 @@ let pp_cmd ppf = function
 type state_item =
   | Queue of string * job list
   | Schedule of schedule_item
+  | Dropped_platform of string
 
 let pp_state_item ppf = function
   | Queue (platform, j) ->
     Fmt.pf ppf "queue platform %s jobs %a"
       platform Fmt.(list ~sep:(any ", ") pp_job) j
   | Schedule s -> Fmt.pf ppf "schedule %a" pp_schedule_item s
+  | Dropped_platform platform ->
+    Fmt.pf ppf "dropped platform %s" platform
 
 type state = state_item list
 
@@ -277,12 +285,14 @@ module Asn = struct
       | `C3 _ -> Log.warn (fun m -> m "job for queue no longer supported, ignoring"); None
       | `C4 e -> Some (Schedule e)
       | `C5 (platform, jobs) -> Some (Queue (platform, jobs))
+      | `C6 platform -> Some (Dropped_platform platform)
     and g = function
       | Some (Schedule s) -> `C4 s
       | Some (Queue (platform, jobs)) -> `C5 (platform, jobs)
+      | Some Dropped_platform platform -> `C6 platform
       | None -> assert false
     in
-    Asn.S.(map f g (choice5
+    Asn.S.(map f g (choice6
                       (explicit 0 script_job)
                       (explicit 1 old_schedule)
                       (explicit 2 job)
@@ -290,7 +300,8 @@ module Asn = struct
                       (explicit 4
                         (sequence2
                           (required ~label:"platform" utf8_string)
-                          (required ~label:"jobs" (sequence_of job))))))
+                          (required ~label:"jobs" (sequence_of job))))
+                      (explicit 5 utf8_string)))
 
   let state_of_cs, state_to_cs =
     let of_cs, to_cs = projections_of (Asn.S.sequence_of state_item) in
@@ -392,7 +403,7 @@ module Asn = struct
               started, uuid, job)
             running
         in
-        Info_reply { schedule ; queues ; running }
+        Info_reply { schedule ; queues ; running ; dropped_platforms = [] }
       | `C2 `C3 () -> assert false
       | `C2 `C4 jn -> Unschedule jn
       | `C2 `C5 id -> Observe id
@@ -408,6 +419,15 @@ module Asn = struct
       | `C4 `C1 () -> Success
       | `C4 `C2 msg -> Failure msg
       | `C4 `C3 (name, platform) -> Execute (name, platform)
+      | `C4 `C4 platform -> Undrop_platform platform
+      | `C4 `C5 (schedule, queues, running, dropped_platforms) ->
+        let running =
+          List.map (fun (started, uuid, job) ->
+              let started = match started with `C1 n | `C2 n -> n in
+              started, uuid, job)
+            running
+        in
+        Info_reply { schedule ; queues ; running ; dropped_platforms }
     and g = function
       | Job_schedule (uuid, job) -> `C1 (`C3 (uuid, job))
       | Job_finished (uuid, res, data) -> `C1 (`C4 (uuid, res, data))
@@ -415,11 +435,11 @@ module Asn = struct
       | Output_timestamped (uuid, ts, out) -> `C1 (`C5 (uuid, out, Some (Int64.to_int ts)))
       | Schedule (period, job) -> `C1 (`C6 (period, job))
       | Info -> `C2 (`C1 ())
-      | Info_reply { schedule ; queues ; running } ->
+      | Info_reply { schedule ; queues ; running ; dropped_platforms } ->
         let running =
           List.map (fun (started, uuid, job) -> `C2 started, uuid, job) running
         in
-        `C2 (`C2 (schedule, queues, running))
+        `C4 (`C5 (schedule, queues, running, dropped_platforms))
       | Unschedule jn -> `C2 (`C4 jn)
       | Observe id -> `C2 (`C5 id)
       | Schedule_orb_build (period, orb_job) -> `C3 (`C1 (period, orb_job))
@@ -431,6 +451,7 @@ module Asn = struct
       | Success -> `C4 (`C1 ())
       | Failure msg -> `C4 (`C2 msg)
       | Execute (job, platform) -> `C4 (`C3 (job, platform))
+      | Undrop_platform platform -> `C4 (`C4 platform)
     in
     Asn.S.(map f g
              (choice4
@@ -485,12 +506,28 @@ module Asn = struct
                    (explicit 15 null)
                    (explicit 16 utf8_string)
                    (explicit 17 utf8_string))
-                (choice3
+                (choice5
                    (explicit 18 null)
                    (explicit 19 utf8_string)
                    (explicit 20 (sequence2
                      (required ~label:"job_name" utf8_string)
                      (optional ~label:"platform" utf8_string)))
+                   (explicit 21 utf8_string)
+                   (explicit 22 (sequence4
+                                  (required ~label:"schedule" (sequence_of schedule))
+                                  (required ~label:"queues"
+                                    (sequence_of
+                                      (sequence2
+                                        (required ~label:"platform" utf8_string)
+                                        (required ~label:"jobs" (sequence_of job)))))
+                                  (required ~label:"running"
+                                     (sequence_of
+                                        (sequence3
+                                           (required ~label:"started"
+                                              (choice2 utc_time generalized_time))
+                                           (required ~label:"uuid" uuid)
+                                           (required ~label:"job" script_job))))
+                                  (required ~label:"dropped-platforms" (sequence_of utf8_string))))
                 )))
 
   let cmd_of_cs, cmd_to_cs = projections_of cmd

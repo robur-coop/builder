@@ -123,6 +123,20 @@ let reschedule () remote name next period =
 let drop_platform () remote name =
   let* s = connect remote in
   let* () = Builder.write_cmd s (Builder.Drop_platform name) in
+  let r = teardown s in
+  Result.iter
+    (fun () ->
+       Logs.app (fun m -> m "Platform %s dropped. \
+                             Remember to disable workers for that platform. \
+                             Workers for %s still running will recreate \
+                             the platform."
+                    name name))
+    r;
+  r
+
+let undrop_platform () remote name =
+  let* s = connect remote in
+  let* () = Builder.write_cmd s (Builder.Undrop_platform name) in
   teardown s
 
 let help () man_format cmds = function
@@ -283,7 +297,7 @@ let execute_cmd =
 
 let drop_platform_cmd =
   let platform =
-    let doc = "The platform to drop" in
+    let doc = "The platform to drop. Remember to disable relevant workers as well." in
     Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
   in
   let term =
@@ -292,10 +306,21 @@ let drop_platform_cmd =
   in
   Cmd.v info term
 
+let undrop_platform_cmd =
+  let platform =
+    let doc = "The platform to undrop." in
+    Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
+  in
+  let term =
+    Term.(term_result (const undrop_platform $ setup_log $ remote $ platform))
+  and info = Cmd.info "undrop-platform"
+  in
+  Cmd.v info term
+
 let help_cmd =
   Term.(ret (const help $ setup_log $ Arg.man_format $ Term.choice_names $ Term.const None))
 
-let cmds = [ schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ; drop_platform_cmd ]
+let cmds = [ schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ; drop_platform_cmd ; undrop_platform_cmd ]
 
 let () =
   let doc = "Builder client" in
