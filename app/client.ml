@@ -134,6 +134,11 @@ let drop_platform () remote name =
     r;
   r
 
+let undrop_platform () remote name =
+  let* s = connect remote in
+  let* () = Builder.write_cmd s (Builder.Undrop_platform name) in
+  teardown s
+
 let help () man_format cmds = function
   | None -> `Help (`Pager, None)
   | Some t when List.mem t cmds -> `Help (man_format, Some t)
@@ -301,10 +306,21 @@ let drop_platform_cmd =
   in
   Cmd.v info term
 
+let undrop_platform_cmd =
+  let platform =
+    let doc = "The platform to undrop." in
+    Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"PLATFORM")
+  in
+  let term =
+    Term.(term_result (const undrop_platform $ setup_log $ remote $ platform))
+  and info = Cmd.info "undrop-platform"
+  in
+  Cmd.v info term
+
 let help_cmd =
   Term.(ret (const help $ setup_log $ Arg.man_format $ Term.choice_names $ Term.const None))
 
-let cmds = [ schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ; drop_platform_cmd ]
+let cmds = [ schedule_cmd ; unschedule_cmd ; info_cmd ; observe_latest_cmd ; observe_cmd ; execute_cmd ; schedule_orb_build_cmd ; reschedule_cmd ; drop_platform_cmd ; undrop_platform_cmd ]
 
 let () =
   let doc = "Builder client" in

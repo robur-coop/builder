@@ -550,7 +550,7 @@ let client_loop t fd =
             (started, uuid, job) :: acc)
           t.running []
       in
-      Builder.{ schedule ; queues ; running }
+      Builder.{ schedule ; queues ; running ; dropped_platforms = SSet.elements t.dropped_platforms }
     in
     write_cmd fd (Builder.Info_reply reply)
   | Builder.Observe id ->
@@ -578,15 +578,26 @@ let client_loop t fd =
     if SM.mem p t.queues then begin
       t.queues <- SM.remove p t.queues;
       t.dropped_platforms <- SSet.add p t.dropped_platforms;
+      let s = S.create ~dummy 13 in
+      S.iter (fun ({ job ; _ } as si) ->
+        match Builder.job_platform job with
+        | Some plat when String.equal plat p -> ()
+        | _ -> S.add s si)
+      t.schedule;
+      t.schedule <- s;
+      ignore (dump t);
       Lwt_condition.broadcast t.waiter (`Platform_removed p);
       Lwt.return (Ok ())
     end else
       Lwt.return (Error (`Msg ("unknown platform " ^ p)))
   | Builder.Undrop_platform p ->
-    (* XXX: error if not dropped? *)
-    t.dropped_platforms <- SSet.remove p t.dropped_platforms;
-    Lwt_condition.broadcast t.waiter `New_job;
-    Lwt.return (Ok ())
+    if SSet.mem p t.dropped_platforms then begin
+      t.dropped_platforms <- SSet.remove p t.dropped_platforms;
+      ignore (dump t);
+      Lwt_condition.broadcast t.waiter `New_job;
+      Lwt.return (Ok ())
+    end else
+      Lwt.return (Error (`Msg ("unknown platform " ^ p)))
   | cmd ->
     Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
     Lwt_result.lift (Error (`Msg "bad communication"))
