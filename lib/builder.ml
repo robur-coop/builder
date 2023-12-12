@@ -339,6 +339,9 @@ module Asn = struct
                 (explicit 3 utf8_string)))
 
   let exec =
+    (* please note that this is used by builder-web as well, so a change needs
+       careful thought in respect to potentially an old builder-web trying to
+       decode the binary *)
     let f = function
       | `C1 (job, uuid, out, (created, finished), res, data) ->
         let created = match created with `C1 n | `C2 n -> n
