@@ -2,7 +2,7 @@
 
 set -ex
 
-wget -O orb.deb 'https://builds.robur.coop/job/orb/build/latest/f/bin/orb.deb?platform=%%PLATFORM%%'
+wget -O orb.deb 'https://builds.robur.coop/job/orb/build/latest/main-binary?platform=%%PLATFORM%%'
 apt install --no-install-recommends --no-install-suggests -y ./orb.deb
 rm orb.deb
 
