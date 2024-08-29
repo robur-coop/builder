@@ -17,11 +17,11 @@ let read fd =
       let open Lwt_result.Infix in
       let bl = Bytes.create 8 in
       r bl 8 >>= fun () ->
-      let l = Cstruct.BE.get_uint64 (Cstruct.of_bytes bl) 0 in
+      let l = Bytes.get_int64_be bl 0 in
       let l_int = Int64.to_int l in (* TODO *)
       let b = Bytes.create l_int in
       r b l_int >|= fun () ->
-      Cstruct.of_bytes b)
+      Bytes.unsafe_to_string b)
     (fun e ->
        Logs.err (fun m -> m "Error while reading: %s" (Printexc.to_string e));
        Lwt.return (Error (`Msg "error in read")))
@@ -29,7 +29,7 @@ let read fd =
 let read_cmd fd =
   let open Lwt_result.Infix in
   read fd >>= fun data ->
-  Lwt.return (Builder.Asn.cmd_of_cs data)
+  Lwt.return (Builder.Asn.cmd_of_str data)
 
 let write fd data =
   Lwt.catch (fun () ->
@@ -40,17 +40,17 @@ let write fd data =
           Lwt_unix.write fd b off l >>= fun written ->
           w b ~off:(written + off) (l - written)
       in
-      let csl = Cstruct.create 8 in
-      Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.length data));
-      w (Cstruct.to_bytes csl) 8 >>= fun () ->
-      w (Cstruct.to_bytes data) (Cstruct.length data) >|= fun () ->
+      let csl = Bytes.create 8 in
+      Bytes.set_int64_be csl 0 (Int64.of_int (String.length data));
+      w csl 8 >>= fun () ->
+      w (Bytes.unsafe_of_string data) (String.length data) >|= fun () ->
       Ok ())
     (fun e ->
        Logs.err (fun m -> m "Error while writing: %s" (Printexc.to_string e));
        Lwt.return (Error (`Msg "unix error in write")))
 
 let write_cmd fd cmd =
-  let data = Builder.Asn.cmd_to_cs cmd in
+  let data = Builder.Asn.cmd_to_str cmd in
   write fd data
 
 let pp_sockaddr ppf = function
@@ -224,9 +224,9 @@ let dump, restore =
          t.dropped_platforms
          and_schedules
      in
-     let data = Builder.Asn.state_to_cs state in
+     let data = Builder.Asn.state_to_str state in
      let bak = Fpath.(t.dbdir / file + "tmp") in
-     let* () = Bos.OS.File.write bak (Cstruct.to_string data) in
+     let* () = Bos.OS.File.write bak data in
      Bos.OS.U.(error_to_msg (rename bak Fpath.(t.dbdir / file)))),
   (fun upload dbdir cfgdir ->
      let* _ = Bos.OS.Dir.create dbdir in
@@ -243,7 +243,7 @@ let dump, restore =
        Ok { queues ; schedule ; dropped_platforms ; running = UM.empty ; waiter ; dbdir ; upload ; he ; cfgdir }
      end else
        let* data = Bos.OS.File.read to_read in
-       let* items = Builder.Asn.state_of_cs (Cstruct.of_string data) in
+       let* items = Builder.Asn.state_of_str data in
        let queues, schedule, dropped_platforms =
          List.fold_left (fun (queues, schedule, dropped_platforms) -> function
              | Builder.Queue (platform, jobs) ->
@@ -265,11 +265,11 @@ let save_to_disk dir (((job : Builder.script_job), uuid, _, _, _, _, _) as full)
   let out_dir = Fpath.(dir / job.Builder.name / Uuidm.to_string uuid) in
   Logs.info (fun m -> m "saving result to %a" Fpath.pp out_dir);
   let* _ = Bos.OS.Dir.create out_dir in
-  let full_cs = Builder.Asn.exec_to_cs full in
-  Bos.OS.File.write Fpath.(out_dir / "full") (Cstruct.to_string full_cs)
+  let full = Builder.Asn.exec_to_str full in
+  Bos.OS.File.write Fpath.(out_dir / "full") full
 
 let upload happy_eyeballs url dir full =
-  let body = Cstruct.to_string (Builder.Asn.exec_to_cs full) in
+  let body = Builder.Asn.exec_to_str full in
   let body_f _ acc data = Lwt.return (acc ^ data) in
   Http_lwt_client.request ~happy_eyeballs ~meth:`POST ~body url body_f "" >|= function
   | Ok (resp, body) ->

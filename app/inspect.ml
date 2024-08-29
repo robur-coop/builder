@@ -14,7 +14,7 @@ let jump () file console script output print_job =
   let ( let* ) = Result.bind in
   let* data = Bos.OS.File.read (Fpath.v file) in
   let* job, _uuid, out, started, now, res, data =
-    Builder.Asn.exec_of_cs (Cstruct.of_string data)
+    Builder.Asn.exec_of_str data
   in
   if print_job then
     Logs.app (fun m -> m "%s on %s" job.Builder.name job.Builder.platform);

@@ -9,6 +9,6 @@ let () =
   let data =
     [ (Fpath.v "hello", "world") ; (Fpath.v "bin/hello.hvt", "random data, this is supposed to be an ELF file") ]
   in
-  let cs = Builder.Asn.exec_to_cs (job, uuid, out, now, finished, res, data) in
-  let encoded = Base64.encode_string (Cstruct.to_string cs) in
+  let buf = Builder.Asn.exec_to_str (job, uuid, out, now, finished, res, data) in
+  let encoded = Base64.encode_string buf in
   print_endline encoded

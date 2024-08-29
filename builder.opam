@@ -9,11 +9,10 @@ license: "ISC"
 depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.0.0"}
-  "asn1-combinators"
+  "asn1-combinators" {>= "0.3.0"}
   "bheap" {>= "2.0.0"}
   "bos"
   "cmdliner" {>= "1.1.0"}
-  "cstruct" {>= "6.0.0"}
   "duration"
   "fmt" {>= "0.8.7"}
   "fpath"
@@ -21,7 +20,7 @@ depends: [
   "lwt"
   "ptime"
   "uuidm"
-  "http-lwt-client" {>= "0.2.0"}
+  "http-lwt-client" {>= "0.3.0"}
   "base64"
 ]
 build: [
