@@ -179,10 +179,10 @@ type state = state_item list
 let pp_state = Fmt.(list ~sep:(any ";@ ") pp_state_item)
 
 module Asn = struct
-  let decode_strict codec cs =
-    match Asn.decode codec cs with
-    | Ok (a, cs) ->
-      if Cstruct.length cs = 0 then
+  let decode_strict codec buf =
+    match Asn.decode codec buf with
+    | Ok (a, rest) ->
+      if String.length rest = 0 then
         Ok a
       else
         Error (`Msg "trailing bytes")
@@ -303,12 +303,12 @@ module Asn = struct
                           (required ~label:"jobs" (sequence_of job))))
                       (explicit 5 utf8_string)))
 
-  let state_of_cs, state_to_cs =
-    let of_cs, to_cs = projections_of (Asn.S.sequence_of state_item) in
-    (fun cs ->
-       let* items = of_cs cs in
+  let state_of_str, state_to_str =
+    let of_str, to_str = projections_of (Asn.S.sequence_of state_item) in
+    (fun buf ->
+       let* items = of_str buf in
        Ok (List.filter_map Fun.id items)),
-    (fun s -> List.map (fun x -> Some x) s |> to_cs)
+    (fun s -> List.map (fun x -> Some x) s |> to_str)
 
   let uuid =
     let f s =
@@ -372,7 +372,7 @@ module Asn = struct
                       (required ~label:"output" data)))
                 (explicit 1 null)))
 
-  let exec_of_cs, exec_to_cs = projections_of exec
+  let exec_of_str, exec_to_str = projections_of exec
 
   let client_or_worker =
     let f = function
@@ -533,7 +533,7 @@ module Asn = struct
                                   (required ~label:"dropped-platforms" (sequence_of utf8_string))))
                 )))
 
-  let cmd_of_cs, cmd_to_cs = projections_of cmd
+  let cmd_of_str, cmd_to_str = projections_of cmd
 end
 
 let rec ign_intr f v =
@@ -553,11 +553,11 @@ let read fd =
     in
     let bl = Bytes.create 8 in
     let* () = r bl 8 in
-    let l = Cstruct.BE.get_uint64 (Cstruct.of_bytes bl) 0 in
+    let l = Bytes.get_int64_be bl 0 in
     let l_int = Int64.to_int l in (* TODO *)
     let b = Bytes.create l_int in
     let* () = r b l_int in
-    Ok (Cstruct.of_bytes b)
+    Ok (Bytes.unsafe_to_string b)
   with
     Unix.Unix_error (err, f, _) ->
     Log.err (fun m -> m "Unix error in %s: %s" f (Unix.error_message err));
@@ -565,7 +565,7 @@ let read fd =
 
 let read_cmd fd =
   let* data = read fd in
-  Asn.cmd_of_cs data
+  Asn.cmd_of_str data
 
 let write fd data =
   try
@@ -576,10 +576,10 @@ let write fd data =
         let written = ign_intr (Unix.write fd b off) l in
         w b ~off:(written + off) (l - written)
     in
-    let csl = Cstruct.create 8 in
-    Cstruct.BE.set_uint64 csl 0 (Int64.of_int (Cstruct.length data));
-    w (Cstruct.to_bytes csl) 8;
-    w (Cstruct.to_bytes data) (Cstruct.length data);
+    let csl = Bytes.create 8 in
+    Bytes.set_int64_be csl 0 (Int64.of_int (String.length data));
+    w csl 8;
+    w (Bytes.unsafe_of_string data) (String.length data);
     Ok ()
   with
     Unix.Unix_error (err, f, _) ->
@@ -587,5 +587,5 @@ let write fd data =
     Error (`Msg "unix error in write")
 
 let write_cmd fd cmd =
-  let data = Asn.cmd_to_cs cmd in
+  let data = Asn.cmd_to_str cmd in
   write fd data
