@@ -7,7 +7,7 @@ bug-reports: "https://github.com/robur-coop/builder/issues"
 license: "ISC"
 
 depends: [
-  "ocaml" {>= "4.08.0"}
+  "ocaml" {>= "4.13.0"}
   "dune" {>= "2.0.0"}
   "asn1-combinators" {>= "0.3.0"}
   "bheap" {>= "2.0.0"}
