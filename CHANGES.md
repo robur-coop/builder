@@ -1,3 +1,15 @@
+# v0.4.0 (2024-09-04)
+
+* improve documentation (#37 et al, fixes #27)
+* adapt to asn1-combinators 0.3.0 API: remove cstruct (#49 @hannesm)
+* queue up observe messages (#48 @reynir)
+* use "/job/_/build/_/main-binary" alias - eases bootstrapping (#42 @reynir)
+* drop platform: advice to shutdown workers (#39 @reynir)
+* FreeBSD: add builder_worker service script (#37 @hannesm)
+* client: enumerate valid periods in `--help` (#36 @reynir)
+* add an interval of "never" to never schedule a job (#34 @hannesm, fixes #32)
+* client: observe omit the UUID (#33 @hannesm)
+
 # v0.3.2 (2023-02-17)
 
 * Worker: fix create_process (@hannesm)
