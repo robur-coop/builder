@@ -42,3 +42,4 @@ on the local file system or upload them to a remote server via http.
 
 See https://builds.robur.coop for the live web frontend (builder-web).
 """
+x-maintenance-intent: [ "(latest)" ]
