@@ -22,7 +22,9 @@ let read fd =
       let b = Bytes.create l_int in
       r b l_int >|= fun () ->
       Bytes.unsafe_to_string b)
-    (fun e ->
+    (function
+      | Lwt.Canceled as e -> Lwt.reraise e
+      | e ->
        Logs.err (fun m -> m "Error while reading: %s" (Printexc.to_string e));
        Lwt.return (Error (`Msg "error in read")))
 
