@@ -19,7 +19,7 @@ depends: [
   "logs"
   "lwt"
   "ptime"
-  "uuidm"
+  "uuidm" {>= "0.9.9"}
   "http-lwt-client" {>= "0.3.0"}
   "base64"
 ]

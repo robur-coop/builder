@@ -312,10 +312,10 @@ module Asn = struct
 
   let uuid =
     let f s =
-      match Uuidm.of_bytes s with
+      match Uuidm.of_binary_string s with
       | None -> Asn.S.error (`Parse "couldn't decode UUID")
       | Some s -> s
-    and g uuid = Uuidm.to_bytes uuid
+    and g uuid = Uuidm.to_binary_string uuid
     in
     Asn.S.(map f g utf8_string)
 
