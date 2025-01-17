@@ -577,7 +577,7 @@ let client_loop t fd =
               more ()
             end else
               (* Drop data messages if the client can't keep up *)
-              Lwt.return_unit
+              more ()
         in
         let rec send () =
           if Queue.is_empty q then
