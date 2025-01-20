@@ -454,7 +454,7 @@ let worker_loop t addr fd =
             job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
             add_to_queue t platform job;
             ignore (dump t)
-          | `Done -> Lwt.return_unit
+          | `Done -> Lwt_unix.close fd
     end
   | Ok cmd ->
     Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
