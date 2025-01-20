@@ -450,11 +450,10 @@ let worker_loop t addr fd =
           Lwt.pick [ timeout () ; read_worker () ] >>= function
           | `Timeout ->
             Logs.warn (fun m -> m "%a timed out" Uuidm.pp uuid);
-            Lwt_unix.close fd >>= fun () ->
             job_finished t uuid (Builder.Msg "timeout") [] >|= fun () ->
             add_to_queue t platform job;
             ignore (dump t)
-          | `Done -> Lwt_unix.close fd
+          | `Done -> Lwt.return_unit
     end
   | Ok cmd ->
     Logs.err (fun m -> m "unexpected %a" Builder.pp_cmd cmd);
